@@ -1,16 +1,21 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace PoolManager.DTOs;
 
-
-/// <summary>
-/// El MatchResponseDto incluye los nombres de los jugadores (no solo IDs), así el cliente no necesita hacer requests extra para saber quién juega. 
-/// Y el campo Status lo calculamos nosotros (upcoming/ongoing/completed) en vez de guardarlo en la DB.
-/// </summary>
 public class CreateMatchDto
 {
+    [Required]
     public int Player1Id { get; set; }
+
+    [Required]
     public int Player2Id { get; set; }
+
+    [Required(ErrorMessage = "La hora de inicio es obligatoria")]
     public DateTime StartTime { get; set; }
+
     public DateTime? EndTime { get; set; }
+
+    [Range(1, 100, ErrorMessage = "El número de mesa debe estar entre 1 y 100")]
     public int? TableNumber { get; set; }
 }
 
@@ -19,6 +24,8 @@ public class UpdateMatchDto
     public DateTime? StartTime { get; set; }
     public DateTime? EndTime { get; set; }
     public int? WinnerId { get; set; }
+
+    [Range(1, 100)]
     public int? TableNumber { get; set; }
 }
 

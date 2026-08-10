@@ -1,32 +1,33 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace PoolManager.DTOs;
 
-
-/// <summary>
-///  Lo que son DTO's en general, sirven para usar ciertos datos del modelo y no todos.
-/// Refiriendonos a que estos van a ser los campos que se van a poder recibir o devolver, y no campos sensibles como "KeycloakId".
-/// El DTO conceptualmente es como las "vistas" en bases de datos. Son los mismos datos pero filtrados, permitiendo ver solo lo [necesario].
-/// </summary>
-
-
-///     Define que datos puede mandar el usuario al crear
 public class CreatePlayerDto
 {
+    [Required(ErrorMessage = "El nombre es obligatorio")]
+    [StringLength(100, MinimumLength = 2, ErrorMessage = "El nombre debe tener entre 2 y 100 caracteres")]
     public string Name { get; set; } = string.Empty;
+
+    [StringLength(50)]
     public string? PreferredCue { get; set; }
+
+    [Required(ErrorMessage = "La foto de perfil es obligatoria")]
+    [Url(ErrorMessage = "La URL de la foto no es válida")]
     public string ProfilePictureUrl { get; set; } = string.Empty;
 }
 
-///     Define que puede modificar (todo nullable porque puede actualizar solo un campo)
-
 public class UpdatePlayerDto
 {
+    [StringLength(100, MinimumLength = 2)]
     public string? Name { get; set; }
+
+    [StringLength(50)]
     public string? PreferredCue { get; set; }
+
+    [Url]
     public string? ProfilePictureUrl { get; set; }
 }
 
-
-///     Define los campos que se pueden devolver. Es preferible devolver esto y no todo el objeto Player.
 public class PlayerResponseDto
 {
     public int Id { get; set; }
