@@ -4,6 +4,8 @@ using Microsoft.IdentityModel.Tokens;
 using PoolManager.Data;
 using PoolManager.Services;
 using Microsoft.OpenApi;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -81,6 +83,29 @@ builder.Services.AddSwaggerGen(options =>
 
 
 
+// Rate Limiting
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    options.AddFixedWindowLimiter("general", opt =>
+    {
+        opt.PermitLimit = 100;
+        opt.Window = TimeSpan.FromMinutes(1);
+        opt.QueueLimit = 0;
+    });
+
+    options.AddFixedWindowLimiter("auth", opt =>
+    {
+        opt.PermitLimit = 5;
+        opt.Window = TimeSpan.FromMinutes(15);
+        opt.QueueLimit = 0;
+    });
+});
+
+// Healthcheck
+builder.Services.AddHealthChecks();
+
 var app = builder.Build();
 
 
@@ -99,9 +124,34 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+
+app.UseRateLimiter();
+
+
+/// Manejo global de excepciones
+/// Qué hace: si cualquier excepción no controlada ocurre, en vez de devolver el stack trace completo (que revela rutas, nombres de clases, etc.), 
+/// devuelve un JSON genérico {"error": "Error interno del servidor"} y loguea el error real internamente.
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+        var exception = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
+
+        logger.LogError(exception, "Error no controlado");
+
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsJsonAsync(new { error = "Error interno del servidor" });
+    });
+});
+
+
 app.UseAuthentication();  // Primero valida el token
 app.UseAuthorization();   // Después verifica permisos/roles
 
 app.MapControllers();
+
+app.MapHealthChecks("/health").AllowAnonymous();
 
 app.Run();

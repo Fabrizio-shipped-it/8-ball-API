@@ -1,12 +1,15 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PoolManager.Services;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace PoolManager.Controllers;
+
 
 [ApiController]
 [Route("[controller]")]
 [Authorize]
+[EnableRateLimiting("general")]
 public class StorageController : ControllerBase
 {
     private readonly S3Service _s3Service;

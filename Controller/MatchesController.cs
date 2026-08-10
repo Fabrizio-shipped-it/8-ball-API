@@ -2,12 +2,14 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PoolManager.DTOs;
 using PoolManager.Services;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace PoolManager.Controllers;
 
 [ApiController]
 [Route("[controller]")]
 [Authorize]
+[EnableRateLimiting("general")]
 public class MatchesController : ControllerBase
 {
     private readonly MatchService _matchService;

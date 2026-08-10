@@ -3,12 +3,15 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PoolManager.DTOs;
 using PoolManager.Services;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace PoolManager.Controllers;
+
 
 [ApiController]
 [Route("[controller]")]
 [Authorize]
+[EnableRateLimiting("general")]
 public class PlayersController : ControllerBase
 {
     private readonly PlayerService _playerService;
