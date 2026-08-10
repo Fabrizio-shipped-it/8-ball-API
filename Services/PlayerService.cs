@@ -17,10 +17,12 @@ namespace PoolManager.Services;
 public class PlayerService
 {
     private readonly AppDbContext _context;
+    private readonly ILogger<PlayerService> _logger;
 
-    public PlayerService(AppDbContext context)
+    public PlayerService(AppDbContext context, ILogger<PlayerService> logger)
     {
         _context = context;
+        _logger = logger;
     }
 
 
@@ -104,6 +106,7 @@ public class PlayerService
 
         _context.Players.Remove(player);
         await _context.SaveChangesAsync();
+        _logger.LogInformation("Jugador eliminado: {PlayerId} - {PlayerName}", player.Id, player.Name);
         return true;
     }
 

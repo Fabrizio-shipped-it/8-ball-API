@@ -8,10 +8,12 @@ namespace PoolManager.Services;
 public class MatchService
 {
     private readonly AppDbContext _context;
+    private readonly ILogger<MatchService> _logger;
 
-    public MatchService(AppDbContext context)
+    public MatchService(AppDbContext context, ILogger<MatchService> logger)
     {
         _context = context;
+        _logger = logger;
     }
 
     public async Task<(MatchResponseDto? Match, string? Error)> Create(CreateMatchDto dto)
@@ -45,6 +47,7 @@ public class MatchService
 
         _context.Matches.Add(match);
         await _context.SaveChangesAsync();
+        _logger.LogInformation("Match creado: #{MatchId} - Jugador {P1} vs {P2}", match.Id, match.Player1Id, match.Player2Id);
 
         return (await MapToDto(match), null);
     }
