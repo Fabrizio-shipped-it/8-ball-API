@@ -1,0 +1,41 @@
+dotnet add package Npgsql.EntityFrameworkCore.PostgreSQL
+dotnet add package Microsoft.EntityFrameworkCore.Design
+dotnet add package Microsoft.AspNetCore.Authentication.JwtBearer
+dotnet add package AWSSDK.S3
+dotnet add package Swashbuckle.AspNetCore
+
+Qué es cada uno:
+
+Npgsql.EntityFrameworkCore.PostgreSQL — EF Core para Postgres (incluye EF Core como dependencia)
+Microsoft.EntityFrameworkCore.Design — herramientas para crear migraciones desde la terminal
+Microsoft.AspNetCore.Authentication.JwtBearer — validar los tokens JWT que emite Keycloak
+AWSSDK.S3 — SDK de Amazon S3, funciona igual con MinIO
+Swashbuckle.AspNetCore — genera Swagger/OpenAPI automáticamente
+
+
+
+-------------------------
+
+dotnet tool install --global dotnet-ef
+
+Eso instala la herramienta de EF Core para la terminal. Si ya la tenés, te lo va a decir.
+
+---------------------
+
+dotnet ef migrations add InitialCreate
+
+Esto genera una carpeta Migrations con archivos que describen cómo crear las tablas. 
+Si querés, abrí el archivo que se genera (va a tener un nombre tipo 20260806_InitialCreate.cs) y mirá cómo traduce tus modelos a CreateTable.
+
+
+dotnet new xunit -n PoolManager.Tests -o PoolManager.Tests
+dotnet add PoolManager.Tests/PoolManager.Tests.csproj reference PoolManager.csproj
+dotnet add PoolManager.Tests/PoolManager.Tests.csproj package Bogus
+dotnet add PoolManager.Tests/PoolManager.Tests.csproj package Microsoft.EntityFrameworkCore.InMemory
+
+Qué hace cada uno:
+
+dotnet new xunit — crea un proyecto de tests con xUnit
+dotnet add reference — le da acceso al código de tu API
+Bogus — genera datos falsos (nombres, emails, etc.) como FactoryBot/Faker en Ruby
+EF Core InMemory — una base de datos en memoria para tests (no necesitás Postgres corriendo)
