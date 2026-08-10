@@ -26,6 +26,8 @@ public class AppDbContext : DbContext
         // Match config
         modelBuilder.Entity<Match>(entity =>
         {
+            entity.HasIndex(m => m.StartTime);      /// Index en este campo para que las busquedas por fecha sean mas eficientes.
+            
             entity.Property(m => m.StartTime).IsRequired();
 
             entity.HasOne(m => m.Player1)               /// HasOne/WithMany: define las relaciones. Un Match tiene un Player1
