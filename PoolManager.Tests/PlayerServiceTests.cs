@@ -1,4 +1,6 @@
 using Bogus;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using PoolManager.DTOs;
 using PoolManager.Models;
 using PoolManager.Services;
@@ -15,7 +17,7 @@ public class PlayerServiceTests
     {
         // Arrange
         var context = TestDbContext.Create();
-        var service = new PlayerService(context);
+        var service = new PlayerService(context, NullLoggerFactory.Instance.CreateLogger<PlayerService>());
         var keycloakId = Guid.NewGuid().ToString();
         var name = _faker.Name.FullName();
 
@@ -32,7 +34,7 @@ public class PlayerServiceTests
     public async Task GetOrCreateFromToken_ReturnsSamePlayerOnSecondLogin()
     {
         var context = TestDbContext.Create();
-        var service = new PlayerService(context);
+        var service = new PlayerService(context, NullLoggerFactory.Instance.CreateLogger<PlayerService>());
         var keycloakId = Guid.NewGuid().ToString();
         var name = _faker.Name.FullName();
 
@@ -46,7 +48,7 @@ public class PlayerServiceTests
     public async Task Create_CreatesPlayerWithValidData()
     {
         var context = TestDbContext.Create();
-        var service = new PlayerService(context);
+        var service = new PlayerService(context, NullLoggerFactory.Instance.CreateLogger<PlayerService>());
         var dto = new CreatePlayerDto
         {
             Name = _faker.Name.FullName(),
@@ -64,7 +66,7 @@ public class PlayerServiceTests
     public async Task GetAll_FiltersByName()
     {
         var context = TestDbContext.Create();
-        var service = new PlayerService(context);
+        var service = new PlayerService(context, NullLoggerFactory.Instance.CreateLogger<PlayerService>());
 
         // Crear 3 jugadores
         await service.Create(new CreatePlayerDto { Name = "Juan Perez", ProfilePictureUrl = "url1" }, Guid.NewGuid().ToString());
@@ -81,7 +83,7 @@ public class PlayerServiceTests
     public async Task Update_OnlyChangesProvidedFields()
     {
         var context = TestDbContext.Create();
-        var service = new PlayerService(context);
+        var service = new PlayerService(context, NullLoggerFactory.Instance.CreateLogger<PlayerService>());
         var keycloakId = Guid.NewGuid().ToString();
 
         await service.Create(new CreatePlayerDto
@@ -101,7 +103,7 @@ public class PlayerServiceTests
     public async Task Delete_RemovesPlayer()
     {
         var context = TestDbContext.Create();
-        var service = new PlayerService(context);
+        var service = new PlayerService(context, NullLoggerFactory.Instance.CreateLogger<PlayerService>());
         var keycloakId = Guid.NewGuid().ToString();
 
         var player = await service.Create(new CreatePlayerDto

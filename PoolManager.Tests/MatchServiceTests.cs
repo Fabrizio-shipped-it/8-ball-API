@@ -1,4 +1,6 @@
 using Bogus;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using PoolManager.DTOs;
 using PoolManager.Models;
 using PoolManager.Services;
@@ -13,8 +15,8 @@ public class MatchServiceTests
     private async Task<(MatchService service, int player1Id, int player2Id)> SetupWithPlayers()
     {
         var context = TestDbContext.Create();
-        var playerService = new PlayerService(context);
-        var matchService = new MatchService(context);
+        var playerService = new PlayerService(context, NullLoggerFactory.Instance.CreateLogger<PlayerService>());
+        var matchService = new MatchService(context, NullLoggerFactory.Instance.CreateLogger<MatchService>());
 
         var p1 = await playerService.Create(new CreatePlayerDto
         {

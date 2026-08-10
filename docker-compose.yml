@@ -36,22 +36,22 @@ services:
     volumes:
       - miniodata:/data
 
-api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: poolmanager-api
-    env_file: .env
-    environment:
-      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
-      Keycloak__Authority: "http://keycloak:8080/realms/poolmanager"
-      S3__ServiceUrl: "http://minio:9000"
-    ports:
-      - "5225:8080"
-    depends_on:
-      - postgres
-      - keycloak
-      - minio
+  api:
+      build:
+        context: .
+        dockerfile: Dockerfile
+      container_name: poolmanager-api
+      env_file: .env
+      environment:
+        ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+        Keycloak__Authority: "http://keycloak:8080/realms/poolmanager"
+        S3__ServiceUrl: "http://minio:9000"
+      ports:
+        - "5225:8080"
+      depends_on:
+        - postgres
+        - keycloak
+        - minio
 
 volumes:
   pgdata:
