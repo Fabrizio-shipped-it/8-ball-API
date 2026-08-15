@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Npgsql;
 using PoolManager.Data;
 using PoolManager.Services;
 using Microsoft.OpenApi;
@@ -12,8 +13,32 @@ var builder = WebApplication.CreateBuilder(args);
 // --- Servicios ---
 
 // PostgreSQL + EF Core
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+var useIamAuth = builder.Configuration.GetValue<bool>("AWS:UseIamAuth");
+
+if (useIamAuth)
+{
+    // En AWS: generar token IAM como contraseña (se renueva cada 14 min)
+    var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
+    dataSourceBuilder.UsePeriodicPasswordProvider(async (settings, ct) =>
+    {
+        return await Amazon.RDS.Util.RDSAuthTokenGenerator.GenerateAuthTokenAsync(
+            settings.Host, settings.Port, settings.Username);
+    }, TimeSpan.FromMinutes(14), TimeSpan.FromSeconds(0));
+    var dataSource = dataSourceBuilder.Build();
+
+    builder.Services.AddDbContext<AppDbContext>(options =>
+        options.UseNpgsql(dataSource));
+}
+else
+{
+    // En local: conexión normal con contraseña en la connection string
+    builder.Services.AddDbContext<AppDbContext>(options =>
+        options.UseNpgsql(connectionString));
+}
+
+
+    
 
 
 
