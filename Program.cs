@@ -36,7 +36,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateIssuer = true,
             ValidateAudience = true,
             ValidateLifetime = true,
-            ValidIssuer = builder.Configuration["Keycloak:Authority"],
+            ValidIssuer = builder.Configuration["Keycloak:PublicAuthority"] 
+           ?? builder.Configuration["Keycloak:Authority"],
             ValidAudience = builder.Configuration["Keycloak:ClientId"]
         };
     });
