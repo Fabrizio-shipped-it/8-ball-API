@@ -59,7 +59,6 @@ public class S3Service
             Key = key,
             Verb = HttpVerb.PUT,
             Expires = DateTime.UtcNow.AddMinutes(15),
-            ContentType = "image/*"
         };
 
         var url = _s3Client.GetPreSignedURL(request);
