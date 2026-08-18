@@ -7,9 +7,40 @@ API REST para gestionar jugadores y partidas de pool (billar), desarrollada con 
 - **.NET 10** — Web API con Controllers
 - **Entity Framework Core** — ORM con PostgreSQL
 - **Keycloak** — Autenticación y autorización (JWT)
-- **MinIO** — Almacenamiento S3-compatible para fotos de perfil
+- **MinIO** — Almacenamiento S3-compatible para fotos de perfil (local)
 - **xUnit + Bogus** — Testing
 - **Docker Compose** — Entorno local
+- **AWS ECS Express Mode** — Deploy en la nube
+- **AWS Aurora PostgreSQL Serverless** — Base de datos cloud con IAM auth
+- **AWS S3** — Storage de imágenes en la nube
+- **AWS ECR** — Registro de imágenes Docker
+- **GitHub Actions** — CI/CD pipeline
+
+## Arquitectura Cloud (AWS)
+
+La API está desplegada en AWS con la siguiente arquitectura:
+
+- **ECS Express Mode** — Contenedor de la API con deployment automático via CI/CD
+- **Aurora PostgreSQL Serverless** — Base de datos con autenticación IAM (sin contraseñas, tokens rotativos cada 14 min)
+- **EC2** — Keycloak para autenticación JWT
+- **S3** — Almacenamiento de fotos de perfil con URLs pre-firmadas
+- **ECR** — Registro de imágenes Docker
+
+```
+[Cliente] → HTTPS → [ECS Express Mode (API)]
+                          ├── JWT validation → [EC2 (Keycloak)]
+                          ├── IAM Auth → [Aurora PostgreSQL Serverless]
+                          └── Pre-signed URLs → [S3]
+```
+
+### Seguridad en AWS
+
+- Autenticación IAM para Aurora (sin contraseñas en connection strings)
+- Tokens RDS generados con `RDSAuthTokenGenerator`, rotación cada 14 minutos
+- Security groups restrictivos (solo IPs necesarias)
+- Principio de mínimo privilegio en IAM (`poolmanager-deployer` solo tiene ECR, S3, ECS, RDS connect)
+- SSL obligatorio en conexión a Aurora
+- Elastic IP en EC2 para IP fija de Keycloak
 
 ## Requisitos previos
 
@@ -108,3 +139,29 @@ dotnet test PoolManager.slnx
 - Índice en StartTime para performance
 - Detección de double-booking en partidas
 - Logging estructurado con ILogger
+
+## CI/CD
+
+El pipeline (`.github/workflows/ci.yml`) se ejecuta en cada push a `main`:
+
+1. **CI** — Restore, build y test del proyecto
+2. **CD** — Build de imagen Docker, push a ECR, redeploy en ECS
+
+Los secrets `AWS_ACCESS_KEY_ID` y `AWS_SECRET_ACCESS_KEY` deben estar configurados en GitHub → Settings → Secrets → Actions.
+
+## Deploy manual
+
+Si necesitás hacer un deploy manual sin pasar por el pipeline:
+
+```bash
+# Login a ECR
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 959015414570.dkr.ecr.us-east-1.amazonaws.com
+
+# Build y push
+docker build -t poolmanager-api .
+docker tag poolmanager-api:latest 959015414570.dkr.ecr.us-east-1.amazonaws.com/poolmanager-api:latest
+docker push 959015414570.dkr.ecr.us-east-1.amazonaws.com/poolmanager-api:latest
+
+# Redeploy en ECS
+aws ecs update-service --cluster default --service poolmanager-api --force-new-deployment
+```
