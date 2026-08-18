@@ -150,7 +150,7 @@ El pipeline (`.github/workflows/ci.yml`) se ejecuta en cada push a `main`:
 Los secrets `AWS_ACCESS_KEY_ID` y `AWS_SECRET_ACCESS_KEY` deben estar configurados en GitHub → Settings → Secrets → Actions.
 
 ## Deploy manual
-
+ 
 Si necesitás hacer un deploy manual sin pasar por el pipeline:
 
 ```bash
