@@ -12,7 +12,6 @@ public class CreatePlayerDto
     public string? PreferredCue { get; set; }
 
     [Required(ErrorMessage = "La foto de perfil es obligatoria")]
-    [Url(ErrorMessage = "La URL de la foto no es válida")]
     public string ProfilePictureUrl { get; set; } = string.Empty;
 }
 
@@ -24,7 +23,6 @@ public class UpdatePlayerDto
     [StringLength(50)]
     public string? PreferredCue { get; set; }
 
-    [Url]
     public string? ProfilePictureUrl { get; set; }
 }
 
