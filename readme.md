@@ -1,4 +1,4 @@
-# 8-Ball Pool Manager API
+https://po-f4ee17d91c17431e9de7c8eb93a36a1c.ecs.us-east-1.on.aws/swagger# 8-Ball Pool Manager API
 
 API REST para gestionar jugadores y partidas de pool (billar), desarrollada con .NET 10 y arquitectura MVC.
 
@@ -15,6 +15,10 @@ API REST para gestionar jugadores y partidas de pool (billar), desarrollada con 
 - **AWS S3** — Storage de imágenes en la nube
 - **AWS ECR** — Registro de imágenes Docker
 - **GitHub Actions** — CI/CD pipeline
+
+**API en la nube:** https://po-f4ee17d91c17431e9de7c8eb93a36a1c.ecs.us-east-1.on.aws
+
+**Swagger UI:** https://po-f4ee17d91c17431e9de7c8eb93a36a1c.ecs.us-east-1.on.aws/swagger
 
 ## Arquitectura Cloud (AWS)
 
