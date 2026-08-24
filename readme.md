@@ -2,8 +2,8 @@
 
 API REST para gestionar jugadores y partidas de pool (billar), desarrollada con .NET 10 y arquitectura MVC.
 
-## Tech Stack
-
+## Tech Stack.
+ 
 - **.NET 10** — Web API con Controllers
 - **Entity Framework Core** — ORM con PostgreSQL
 - **Keycloak** — Autenticación y autorización (JWT)
