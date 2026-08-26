@@ -46,6 +46,8 @@ services:
         ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
         Keycloak__Authority: "http://keycloak:8080/realms/poolmanager"
         S3__ServiceUrl: "http://minio:9000"
+        S3__AccessKey: "${MINIO_ROOT_USER}"
+        S3__SecretKey: "${MINIO_ROOT_PASSWORD}"
       ports:
         - "5225:8080"
       depends_on:

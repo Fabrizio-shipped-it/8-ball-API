@@ -1,311 +1,268 @@
-# Runbook de despliegue en AWS — 8-Ball Pool Manager API
+# Deploy AWS — 8-Ball Pool Manager API (solo consola web)
 
-Objetivo: de cuenta vacía a API funcionando en ~30 minutos.
-Región: `us-east-1`. Todo por AWS CLI salvo dos pasos de consola web.
+Región: **us-east-1** en todos los pasos. Sin AWS CLI local.
+La imagen Docker la buildea GitHub Actions, no tu máquina.
 
 ---
 
-## Antes de arrancar: cambios de código ya aplicados
+## Antes: 4 cambios de código ya aplicados
 
-Estos tres bugs habrían hecho fallar el despliegue. Ya están corregidos en el repo:
+| Archivo | Cambio |
+|---|---|
+| `Services/S3Service.cs` | Usa el task role cuando no hay AccessKey/SecretKey. Antes crasheaba al arrancar. |
+| `Services/S3Service.cs` | URL de descarga: 24 h → 1 h. |
+| `appsettings.json` | Sacadas las claves de MinIO. Ahora viven en `docker-compose.yml`. |
+| `.github/workflows/ci.yml` | Pushea tag `latest` además del SHA. Sin esto el redeploy bajaba la imagen vieja. |
 
-| Archivo | Problema | Por qué importaba |
-|---|---|---|
-| `Services/S3Service.cs` | `new AmazonS3Client(null, null, config)` | En AWS no hay `S3:AccessKey`/`SecretKey` (se usa el task role). El constructor lanzaba `ArgumentNullException` y el contenedor moría **antes** de responder el health check → ECS lo mataba en loop y nunca veías el error real. |
-| `Services/S3Service.cs` | URL de descarga firmada a 24 h | Las credenciales del task role son temporales. La URL deja de funcionar cuando expira el session token (~6 h) aunque la firma diga 24 h. Bajado a 1 h. |
-| `.github/workflows/ci.yml` | Solo pusheaba la tag `$GITHUB_SHA` | El servicio de ECS apunta a un tag fijo. `--force-new-deployment` volvía a bajar **la misma imagen vieja**. Ahora pushea `latest` + SHA. |
+Local sigue funcionando igual (`docker compose up -d`).
 
-**Commiteá esto antes de empezar** (todavía sin push, o el pipeline va a fallar porque ECR no existe):
+Commiteá, **sin pushear**:
 
-```bash
-git add Services/S3Service.cs .github/workflows/ci.yml
+```powershell
+git add Services/S3Service.cs appsettings.json docker-compose.yml .github/workflows/ci.yml DEPLOY-AWS.md
 git commit -m "fix: credenciales S3 via task role + pipeline redeploy real"
 ```
 
 ---
 
-## Veredicto sobre "Posible estructura de 8-ball.txt"
+## Orden
 
-**El diseño es correcto.** ECS Express + ECR + S3 + GitHub Actions sigue siendo la mejor opción hoy — App Runner entró en maintenance mode y deja de aceptar clientes nuevos el 30/04/2026, y AWS señala explícitamente a ECS Express como su reemplazo.
+```
+1  Usuario IAM para GitHub          3 min
+2  ECR                              1 min
+3  Push a GitHub → imagen en ECR    6 min   ← corre solo, seguí con 4
+4  Aurora                           2 min
+5  S3                               1 min
+6  Elastic IP + EC2 Keycloak        6 min
+7  Roles IAM                        4 min
+8  Migraciones (CloudShell)         2 min
+9  Servicio ECS Express             4 min
+10 Realm de Keycloak                5 min
+```
 
-Se mantiene igual:
+Anotá a medida que avanzás:
 
-- ECS Express Mode para la API (Fargate + ALB + HTTPS + autoscaling, sin configurar nada)
-- ECR para las imágenes
-- Aurora PostgreSQL Express (fuera de VPC, IAM auth) — GA desde 25/03/2026, entra en free tier
-- S3 para fotos
-- EC2 para Keycloak
+```
+ACCOUNT_ID  = ____________
+KC_IP       = ____________
+DB_HOST     = ____________
+DB_RES_ID   = ____________
+BUCKET      = ____________
+API_URL     = ____________
+```
 
-Se corrige:
-
-1. **`KeycloakUrlRewriteHandler` no se usa más.** Existía porque `Authority` (IP privada) y `PublicAuthority` (Elastic IP) diferían y había que reescribir el discovery document. Solución: usar **la Elastic IP en los dos lados**. Si `Authority == PublicAuthority`, el handler ni se instancia (mirá la condición en `Program.cs:60`). Menos piezas móviles, menos superficie de falla.
-2. **Keycloak sin Postgres aparte.** `start-dev` con la base H2 sobre un volumen Docker persistido en el EBS de la instancia. Un contenedor en vez de dos, y no hay que sincronizar credenciales.
-3. **No hay que hacer `GRANT rds_iam` a mano.** Con Aurora Express el internet access gateway ya deja al usuario master (`postgres`) configurado con `rds_iam` automáticamente. Ese paso manual desaparece.
-4. **`GSS Encryption Mode=Disable` desde el minuto cero**, como bien anotaste. Va en la connection string de la Fase 7.
-
-Sobre el 504 anterior: coincido en que el síntoma es del driver, no de la infra. Pero ojo — el crash de `S3Service` en el arranque produce exactamente el mismo cuadro clínico (tarea que no levanta, ALB devolviendo 5xx), así que probablemente tenías **dos** bugs superpuestos y arreglar uno solo no te iba a mostrar mejora.
+Tu **ACCOUNT_ID** está arriba a la derecha, al clickear tu nombre de usuario.
 
 ---
 
-## Orden de ejecución
+## 1. Usuario IAM para GitHub Actions
 
-Aurora tarda un poco en quedar `available` y el build de .NET tarda varios minutos. Por eso **se lanzan primero y se trabaja en paralelo** mientras provisionan.
+IAM → Users → **Create user**
 
-```
-Fase 0  Credenciales                    3 min
-Fase 1  Lanzar Aurora        ──┐        1 min  (sigue en background)
-Fase 2  ECR + build + push   ──┤        6 min  (corre mientras Aurora provisiona)
-Fase 3  Bucket S3              │        1 min
-Fase 4  Keycloak en EC2      ──┘        6 min
-Fase 5  Roles IAM de ECS                2 min
-Fase 6  Migraciones                     2 min
-Fase 7  Crear servicio ECS Express      4 min
-Fase 8  Configurar realm de Keycloak    5 min
-Fase 9  Secrets de GitHub Actions       2 min
-```
+- Nombre: `poolmanager-deployer`
+- **NO** marcar acceso a consola
+- Permissions → *Attach policies directly* → marcá:
+  - `AmazonEC2ContainerRegistryPowerUser`
+  - `AmazonECS_FullAccess`
+- Create user
+
+Entrá al usuario → **Security credentials** → Create access key → *Third-party service* → confirmá → **Create**.
+
+Dejá la pantalla abierta, los valores se usan en el paso 3.
 
 ---
 
-## Fase 0 — Credenciales (3 min)
+## 2. ECR
 
-Consola web → IAM → Users → **Create user** → `poolmanager-admin` → Attach policies directly → `AdministratorAccess`.
-Después: pestaña **Security credentials** → Create access key → *Command Line Interface*.
+ECR → Repositories → **Create repository**
 
-> Es un usuario de setup, no de producción. Cuando termines podés borrarlo y quedarte solo con `poolmanager-deployer` (Fase 9), que tiene permisos mínimos.
-
-```bash
-aws configure
-# AWS Access Key ID:     <la que acabás de crear>
-# AWS Secret Access Key: <...>
-# Default region name:   us-east-1
-# Default output format: json
-```
-
-Guardá el account ID en una variable, se usa en casi todas las fases:
-
-```bash
-export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-export AWS_REGION=us-east-1
-echo $ACCOUNT_ID
-```
-
-> **En PowerShell** usá `$env:ACCOUNT_ID = (aws sts get-caller-identity --query Account --output text)` y `$env:VAR` para leerlas. El resto de los comandos son idénticos salvo el salto de línea: reemplazá `\` por backtick `` ` ``.
-
-**Checkpoint:** `aws sts get-caller-identity` devuelve tu ARN.
+- Nombre: `poolmanager-api`
+- Resto por defecto → Create
 
 ---
 
-## Fase 1 — Lanzar Aurora (1 min, sigue en background)
+## 3. Push a GitHub
 
-```bash
-aws rds create-db-cluster \
-  --db-cluster-identifier poolmanager-db \
-  --engine aurora-postgresql \
-  --with-express-configuration
+GitHub → tu repo → Settings → Secrets and variables → **Actions** → New repository secret. Creá dos:
+
+| Name | Value |
+|---|---|
+| `AWS_ACCESS_KEY_ID` | del paso 1 |
+| `AWS_SECRET_ACCESS_KEY` | del paso 1 |
+
+Después cerrá la pestaña de AWS con las claves.
+
+```powershell
+git push origin main
 ```
 
-Eso es todo. Un solo flag crea cluster + instancia serverless + internet access gateway + IAM auth para el usuario master. Sin VPC, sin subnet group, sin security group.
+En la pestaña **Actions** vas a ver:
 
-Defaults que te da: usuario master `postgres`, base `postgres`, puerto 5432, encriptado, backup 1 día.
+- `build-and-test` ✅
+- `deploy` → pushea la imagen ✅ y **falla en "Force new ECS deployment"** ❌
 
-**No esperes a que termine.** Seguí con la Fase 2 y volvés a chequear más tarde.
+Ese fallo es esperado: el servicio ECS todavía no existe. Se crea en el paso 9 y a partir de ahí el pipeline queda verde.
+
+**Verificá:** ECR → `poolmanager-api` → tiene que haber una imagen con tag `latest`.
+
+Mientras buildea, seguí con el paso 4.
 
 ---
 
-## Fase 2 — ECR + primera imagen (6 min)
+## 4. Aurora
 
-```bash
-aws ecr create-repository --repository-name poolmanager-api
+RDS → Databases. En la pantalla de bienvenida, sección **Create with express configuration in seconds** → **Create**.
 
-aws ecr get-login-password --region us-east-1 \
-  | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com
+- DB cluster identifier: `poolmanager-db`
+- Resto por defecto → **Create database**
 
-export ECR=$ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/poolmanager-api
+Queda `Available` en segundos.
 
-docker build -t $ECR:latest .
-docker push $ECR:latest
-```
+Entrá al cluster → **Connectivity & security** → anotá el **Writer endpoint** → ese es tu `DB_HOST`.
 
-> El `docker build` de .NET 10 tarda 3-5 min la primera vez. Dejalo corriendo y arrancá la Fase 3 en otra terminal.
+Pestaña **Configuration** → anotá el **Resource ID** (empieza con `cluster-`) → ese es tu `DB_RES_ID`.
 
-**Checkpoint:** `aws ecr list-images --repository-name poolmanager-api` muestra la tag `latest`.
+> Usuario master: `postgres`. Base: `postgres`. Auth: solo IAM (ya viene configurada).
 
 ---
 
-## Fase 3 — Bucket S3 (1 min)
+## 5. S3
 
-```bash
-export BUCKET=poolmanager-profile-pictures-$ACCOUNT_ID
+S3 → **Create bucket**
 
-aws s3api create-bucket --bucket $BUCKET --region us-east-1
-```
+- Nombre: `poolmanager-profile-pictures-<ACCOUNT_ID>`
+- Region: us-east-1
+- Resto por defecto (Block all public access queda activado) → Create
 
-> Se le agrega el account ID porque los nombres de bucket son globales y `poolmanager-profile-pictures` a secas puede estar tomado.
-
-El bucket queda privado. No hace falta abrirlo: la API sirve todo por URLs pre-firmadas.
+Anotá el nombre como `BUCKET`.
 
 ---
 
-## Fase 4 — Keycloak en EC2 (6 min)
+## 6. Elastic IP + EC2 (Keycloak)
 
-### 4.1 Elastic IP primero
+### 6.1 Elastic IP
 
-El orden importa: necesitás la IP **antes** de lanzar la instancia, porque va incrustada en la config de Keycloak.
+EC2 → Network & Security → **Elastic IPs** → Allocate Elastic IP address → Allocate.
 
-```bash
-export EIP_ALLOC=$(aws ec2 allocate-address --domain vpc --query AllocationId --output text)
-export KC_IP=$(aws ec2 describe-addresses --allocation-ids $EIP_ALLOC \
-  --query 'Addresses[0].PublicIp' --output text)
-echo "Keycloak va a vivir en: $KC_IP"
-```
+Anotá la IP → es tu `KC_IP`. **La necesitás antes de lanzar la instancia.**
 
-### 4.2 Security group
+### 6.2 Instancia
 
-```bash
-export VPC_ID=$(aws ec2 describe-vpcs --filters Name=is-default,Values=true \
-  --query 'Vpcs[0].VpcId' --output text)
+EC2 → Instances → **Launch instances**
 
-export KC_SG=$(aws ec2 create-security-group \
-  --group-name poolmanager-keycloak-sg \
-  --description "Keycloak 8080" \
-  --vpc-id $VPC_ID --query GroupId --output text)
-
-# 8080 abierto a internet: las tareas de Fargate tienen IP pública dinámica,
-# no se puede restringir a un rango fijo sin meterse con NAT/VPC endpoints.
-aws ec2 authorize-security-group-ingress --group-id $KC_SG \
-  --protocol tcp --port 8080 --cidr 0.0.0.0/0
-```
-
-### 4.3 Lanzar la instancia
+- Name: `poolmanager-keycloak`
+- AMI: **Amazon Linux 2023**
+- Instance type: `t3.small`
+- Key pair: *Proceed without a key pair*
+- **Network settings → Edit → Create security group**
+  - Nombre: `poolmanager-keycloak-sg`
+  - Borrá la regla SSH
+  - Add security group rule: Type `Custom TCP`, Port `8080`, Source `0.0.0.0/0`
+- **Advanced details** → bajá hasta **User data** → pegá esto, reemplazando `TU_ELASTIC_IP`:
 
 ```bash
-export MI_IP=$(curl -s https://checkip.amazonaws.com)
-aws ec2 authorize-security-group-ingress --group-id $KC_SG \
-  --protocol tcp --port 22 --cidr $MI_IP/32
-
-cat > /tmp/kc-userdata.sh <<EOF
 #!/bin/bash
 dnf install -y docker
 systemctl enable --now docker
 docker volume create kcdata
-docker run -d --name keycloak --restart always -p 8080:8080 \\
-  -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \\
-  -e KC_BOOTSTRAP_ADMIN_PASSWORD='CambiameYa_2026!' \\
-  -e KEYCLOAK_ADMIN=admin \\
-  -e KEYCLOAK_ADMIN_PASSWORD='CambiameYa_2026!' \\
-  -e KC_HOSTNAME=http://$KC_IP:8080 \\
-  -e KC_HOSTNAME_STRICT=false \\
-  -e KC_HTTP_ENABLED=true \\
-  -v kcdata:/opt/keycloak/data \\
+docker run -d --name keycloak --restart always -p 8080:8080 \
+  -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
+  -e KC_BOOTSTRAP_ADMIN_PASSWORD='CambiameYa_2026!' \
+  -e KC_HOSTNAME=http://TU_ELASTIC_IP:8080 \
+  -e KC_HOSTNAME_STRICT=false \
+  -e KC_HTTP_ENABLED=true \
+  -v kcdata:/opt/keycloak/data \
   quay.io/keycloak/keycloak:26.4 start-dev
-EOF
-
-export AMI=$(aws ssm get-parameter \
-  --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 \
-  --query 'Parameter.Value' --output text)
-
-export KC_INSTANCE=$(aws ec2 run-instances \
-  --image-id $AMI \
-  --instance-type t3.small \
-  --security-group-ids $KC_SG \
-  --user-data file:///tmp/kc-userdata.sh \
-  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=poolmanager-keycloak}]' \
-  --query 'Instances[0].InstanceId' --output text)
-
-aws ec2 wait instance-running --instance-ids $KC_INSTANCE
-aws ec2 associate-address --instance-id $KC_INSTANCE --allocation-id $EIP_ALLOC
 ```
 
-> `t3.small` (~$15/mes). `t3.micro` entra en free tier y funciona, pero con 1 GB Keycloak arranca muy justo y puede tardar el doble. Si estás optimizando costo y no tiempo, cambiá el tipo.
+**Launch instance**
 
-**Checkpoint** (dale ~2 min para que instale Docker y baje la imagen):
+### 6.3 Asociar la IP
 
-```bash
-curl -s http://$KC_IP:8080/realms/master/.well-known/openid-configuration | head -c 200
-```
+EC2 → Elastic IPs → seleccioná la tuya → Actions → **Associate Elastic IP address** → Instance: `poolmanager-keycloak` → Associate.
 
-Tiene que devolver JSON con `"issuer":"http://<KC_IP>:8080/realms/master"`. Si devuelve vacío, esperá un minuto más.
+**Verificá** (esperá ~2 min): abrí `http://TU_ELASTIC_IP:8080` en el navegador. Tiene que cargar la pantalla de login de Keycloak.
 
 ---
 
-## Fase 5 — Roles IAM de ECS (2 min)
+## 7. Roles IAM
 
-Dos roles obligatorios de Express Mode, más un tercero para tu aplicación.
+### 7.1 Task execution role
 
-```bash
-# Task execution role — ECS lo usa para bajar la imagen y escribir logs
-aws iam create-role --role-name ecsTaskExecutionRole \
-  --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ecs-tasks.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
-aws iam attach-role-policy --role-name ecsTaskExecutionRole \
-  --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+IAM → Roles → **Create role**
 
-# Infrastructure role — ECS lo usa para crear el ALB, target groups, autoscaling
-aws iam create-role --role-name ecsInfrastructureRoleForExpressServices \
-  --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ecs.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
-aws iam attach-role-policy --role-name ecsInfrastructureRoleForExpressServices \
-  --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSInfrastructureRoleforExpressGatewayServices
+- Trusted entity: **AWS service** → Use case: **Elastic Container Service** → **Elastic Container Service Task** → Next
+- Permissions: buscá y marcá `AmazonECSTaskExecutionRolePolicy` → Next
+- Role name: `ecsTaskExecutionRole` → Create
 
-# Task role — lo usa TU CÓDIGO para hablar con RDS y S3
-aws iam create-role --role-name poolmanager-task-role \
-  --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ecs-tasks.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
-```
+> Si ya existe, saltealo.
 
-Ahora el permiso a la base. Necesita el **resource ID del cluster**, no el nombre:
+### 7.2 Infrastructure role
 
-```bash
-export DB_RESOURCE_ID=$(aws rds describe-db-clusters --db-cluster-identifier poolmanager-db \
-  --query 'DBClusters[0].DbClusterResourceId' --output text)
-export DB_HOST=$(aws rds describe-db-clusters --db-cluster-identifier poolmanager-db \
-  --query 'DBClusters[0].Endpoint' --output text)
-echo "resource id: $DB_RESOURCE_ID"
-echo "endpoint:    $DB_HOST"
-```
+IAM → Roles → **Create role**
 
-> Si estos comandos fallan o devuelven vacío, Aurora todavía está creándose. Chequeá con
-> `aws rds describe-db-clusters --db-cluster-identifier poolmanager-db --query 'DBClusters[0].Status'`
-> hasta que diga `available`.
+- Trusted entity: **Custom trust policy** → pegá:
 
-```bash
-cat > /tmp/task-policy.json <<EOF
+```json
 {
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "AuroraIamAuth",
       "Effect": "Allow",
-      "Action": "rds-db:connect",
-      "Resource": "arn:aws:rds-db:us-east-1:$ACCOUNT_ID:dbuser:$DB_RESOURCE_ID/postgres"
-    },
-    {
-      "Sid": "S3Objects",
-      "Effect": "Allow",
-      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
-      "Resource": "arn:aws:s3:::$BUCKET/*"
-    },
-    {
-      "Sid": "S3Bucket",
-      "Effect": "Allow",
-      "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
-      "Resource": "arn:aws:s3:::$BUCKET"
+      "Principal": { "Service": "ecs.amazonaws.com" },
+      "Action": "sts:AssumeRole"
     }
   ]
 }
-EOF
-
-aws iam put-role-policy --role-name poolmanager-task-role \
-  --policy-name poolmanager-rds-s3 \
-  --policy-document file:///tmp/task-policy.json
 ```
 
-> **Trampa clásica:** el ARN de `rds-db:connect` lleva el `DbClusterResourceId` (`cluster-XXXXXX`), no `poolmanager-db`. Si ponés el nombre, la conexión falla con un error de autenticación que no menciona IAM por ningún lado.
+- Next → marcá `AmazonECSInfrastructureRoleforExpressGatewayServices` → Next
+- Role name: `ecsInfrastructureRoleForExpressServices` → Create
+
+### 7.3 Policy de la app
+
+IAM → Policies → **Create policy** → pestaña **JSON** → pegá reemplazando los 4 placeholders:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "rds-db:connect",
+      "Resource": "arn:aws:rds-db:us-east-1:ACCOUNT_ID:dbuser:DB_RES_ID/postgres"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Resource": "arn:aws:s3:::BUCKET/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
+      "Resource": "arn:aws:s3:::BUCKET"
+    }
+  ]
+}
+```
+
+Name: `poolmanager-rds-s3` → Create policy
+
+> `DB_RES_ID` es el **Resource ID** (`cluster-XXXX`), no `poolmanager-db`. Si ponés el nombre, la conexión falla con un error que no menciona IAM.
+
+### 7.4 Task role
+
+IAM → Roles → **Create role**
+
+- **AWS service** → **Elastic Container Service** → **Elastic Container Service Task** → Next
+- Marcá `poolmanager-rds-s3` → Next
+- Role name: `poolmanager-task-role` → Create
 
 ---
 
-## Fase 6 — Migraciones (2 min)
+## 8. Migraciones
 
-La forma más rápida y sin instalar nada: **CloudShell**, que ya viene con `psql` y credenciales.
-
-Consola → ícono de CloudShell (arriba a la derecha) → pegá:
+Consola → ícono **CloudShell** (arriba a la derecha). Pegá:
 
 ```bash
 export DB_HOST=$(aws rds describe-db-clusters --db-cluster-identifier poolmanager-db \
@@ -315,267 +272,146 @@ export PGPASSWORD=$(aws rds generate-db-auth-token \
 psql "host=$DB_HOST port=5432 dbname=postgres user=postgres sslmode=require"
 ```
 
-Cuando veas el prompt `postgres=>`, pegá el contenido de `migrate.sql` y dale Enter.
+En el prompt `postgres=>` pegá todo el contenido de `migrate.sql` y Enter.
 
-Verificá:
+Verificá con `\dt` → tienen que aparecer `Players`, `Matches`, `__EFMigrationsHistory`.
 
-```sql
-\dt
-```
-
-Tenés que ver `Players`, `Matches` y `__EFMigrationsHistory`.
-
-> Si preferís hacerlo local y tenés `psql` instalado, son los mismos tres comandos. El token vale 15 minutos; si tardás más, regeneralo.
+Salí con `\q`.
 
 ---
 
-## Fase 7 — Crear el servicio ECS Express (4 min)
+## 9. Servicio ECS Express
 
-Acá se juntan todas las piezas. Revisá que tengas las variables cargadas:
+ECS → **Create** → elegí **Express** (no "Service" clásico).
 
-```bash
-echo "$ACCOUNT_ID / $ECR / $BUCKET / $KC_IP / $DB_HOST"
-```
+- Service name: `poolmanager-api`
+- Container image: pegá el URI de ECR con tag `latest`:
+  `ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/poolmanager-api:latest`
+- Container port: `8080`
+- Health check path: `/health`
+- CPU: `0.5 vCPU` · Memory: `1 GB`
+- Task execution role: `ecsTaskExecutionRole`
+- Infrastructure role: `ecsInfrastructureRoleForExpressServices`
+- Task role: `poolmanager-task-role`
 
-```bash
-cat > /tmp/container.json <<EOF
-{
-  "image": "$ECR:latest",
-  "containerPort": 8080,
-  "environment": [
-    {"name": "AWS__UseIamAuth", "value": "true"},
-    {"name": "ConnectionStrings__DefaultConnection",
-     "value": "Host=$DB_HOST;Port=5432;Database=postgres;Username=postgres;SSL Mode=Require;Trust Server Certificate=true;GSS Encryption Mode=Disable"},
-    {"name": "Keycloak__Authority", "value": "http://$KC_IP:8080/realms/poolmanager"},
-    {"name": "Keycloak__ClientId", "value": "poolmanager-api"},
-    {"name": "S3__ServiceUrl", "value": ""},
-    {"name": "S3__AccessKey", "value": ""},
-    {"name": "S3__SecretKey", "value": ""},
-    {"name": "S3__Region", "value": "us-east-1"},
-    {"name": "S3__BucketName", "value": "$BUCKET"},
-    {"name": "S3__ForcePathStyle", "value": "false"},
-    {"name": "ASPNETCORE_ENVIRONMENT", "value": "Production"}
-  ]
-}
-EOF
+**Environment variables** — agregá una por una (tipo *Environment variable*, no *Secret*):
 
-aws ecs create-express-gateway-service \
-  --service-name poolmanager-api \
-  --primary-container file:///tmp/container.json \
-  --execution-role-arn arn:aws:iam::$ACCOUNT_ID:role/ecsTaskExecutionRole \
-  --infrastructure-role-arn arn:aws:iam::$ACCOUNT_ID:role/ecsInfrastructureRoleForExpressServices \
-  --task-role-arn arn:aws:iam::$ACCOUNT_ID:role/poolmanager-task-role \
-  --cpu 512 --memory 1024 \
-  --health-check-path /health \
-  --scaling-target '{"minTaskCount":1,"maxTaskCount":3}' \
-  --monitor-resources
-```
+| Key | Value |
+|---|---|
+| `AWS__UseIamAuth` | `true` |
+| `ConnectionStrings__DefaultConnection` | `Host=DB_HOST;Port=5432;Database=postgres;Username=postgres;SSL Mode=Require;Trust Server Certificate=true;GSS Encryption Mode=Disable` |
+| `Keycloak__Authority` | `http://KC_IP:8080/realms/poolmanager` |
+| `Keycloak__ClientId` | `poolmanager-api` |
+| `S3__ServiceUrl` | *(dejar vacío o no agregarla)* |
+| `S3__Region` | `us-east-1` |
+| `S3__BucketName` | `BUCKET` |
+| `S3__ForcePathStyle` | `false` |
+| `ASPNETCORE_ENVIRONMENT` | `Production` |
 
-### Por qué cada variable
+**Create**
 
-- **`AWS__UseIamAuth=true`** activa la rama de `Program.cs` que genera tokens IAM con `RDSAuthTokenGenerator` en vez de usar password. Sin esto intenta conectarse con la password de `appsettings.json` (que no existe en Aurora Express) y falla.
-- **`GSS Encryption Mode=Disable`** — tu hallazgo. Npgsql 10 negocia GSSAPI por defecto (`Prefer`); el gateway de Aurora no lo soporta y la conexión se cuelga hasta timeout. De ahí el 504.
-- **`SSL Mode=Require`** es obligatorio: el internet access gateway solo acepta TLS.
-- **`S3__ServiceUrl=""`** vacío hace que `S3Service` caiga en la rama de `RegionEndpoint` en vez de apuntar a MinIO.
-- **`S3__AccessKey=""` y `S3__SecretKey=""`** son imprescindibles y fáciles de pasar por alto: `appsettings.json` trae `minioadmin` / `minio_secret_123` hardcodeados y viajan dentro de la imagen. Si no los pisás con vacío, la API los toma como válidos, ignora el task role y firma todas las URLs con credenciales de MinIO → `SignatureDoesNotMatch` en cada llamada a `/storage/*`. Vaciarlos fuerza la cadena de credenciales por defecto.
-- **No se define `Keycloak__ClientSecret`** — la API solo *valida* tokens, no los emite. No lo necesita.
-- **No se define `Keycloak__PublicAuthority`** — por eso el `KeycloakUrlRewriteHandler` no se activa.
+Tarda 2-4 min. Cuando quede `ACTIVE`, la URL aparece en la pantalla del servicio (`https://poolmanager-api-XXXX.ecs.us-east-1.on.aws`). Anotala como `API_URL`.
 
-Si `--monitor-resources` corta con `Unable to assume the service linked role`, esperá un minuto (los roles IAM son *eventually consistent*) y reintentá el mismo comando.
-
-Guardá la URL:
-
-```bash
-export SERVICE_ARN=$(aws ecs describe-express-gateway-service \
-  --service-arn arn:aws:ecs:us-east-1:$ACCOUNT_ID:service/default/poolmanager-api \
-  --query 'service.serviceArn' --output text)
-
-aws ecs describe-express-gateway-service --service-arn $SERVICE_ARN \
-  --query 'service.activeConfigurations[0].ingressPaths[*].endpoint' --output text
-```
-
-**Checkpoint:**
-
-```bash
-curl https://<tu-url>.ecs.us-east-1.on.aws/health
-```
-
-Tiene que devolver `Healthy`.
+**Verificá:** abrí `API_URL/health` en el navegador → `Healthy`.
 
 ### Si no levanta
 
-```bash
-aws logs tail /ecs/poolmanager-api --follow
-```
+ECS → `poolmanager-api` → pestaña **Logs**.
 
-| Lo que ves en el log | Qué es |
+| Log | Causa |
 |---|---|
-| `Npgsql...timeout` / se cuelga en el arranque | Falta `GSS Encryption Mode=Disable` |
-| `PostgresException: PAM authentication failed` | El ARN de `rds-db:connect` está mal (usaste el nombre en vez del resource ID) |
-| `ArgumentNullException` en `S3Service` | No aplicaste el fix de la Fase 0 |
-| `SignatureDoesNotMatch` al firmar URLs | El task role no tiene los permisos de S3, o el bucket del env var no coincide |
-| Tarea que arranca y muere en loop sin log claro | Casi siempre es una excepción en el `await s3.EnsureBucketExists()` del arranque de `Program.cs` |
+| `Npgsql` timeout / cuelgue al arrancar | Falta `GSS Encryption Mode=Disable` |
+| `PAM authentication failed` | ARN de `rds-db:connect` mal (usaste el nombre en vez del Resource ID) |
+| `SignatureDoesNotMatch` en `/storage/*` | Falta `poolmanager-rds-s3` en el task role, o `S3__BucketName` no coincide |
+| Tarea que arranca y muere en loop | Excepción en `EnsureBucketExists()` — revisá permisos de S3 |
 
 ---
 
-## Fase 8 — Configurar el realm de Keycloak (5 min)
+## 10. Realm de Keycloak
 
-Navegador → `http://<KC_IP>:8080` → admin / `CambiameYa_2026!`
+`http://KC_IP:8080` → admin / `CambiameYa_2026!`
 
-1. **Create realm** → nombre exacto: `poolmanager`
+1. **Create realm** → nombre: `poolmanager`
 2. **Clients → Create client**
    - Client ID: `poolmanager-api`
    - Client authentication: **ON**
-   - Authentication flow: marcá **Standard flow** y **Direct access grants**
+   - Marcá **Standard flow** y **Direct access grants**
 3. **Client scopes** → `poolmanager-api-dedicated` → **Add mapper → By configuration → Audience**
    - Included Client Audience: `poolmanager-api`
    - Add to access token: **ON**
 
-   > Sin este mapper el token no lleva `aud` y tu API lo rechaza, porque `Program.cs` tiene `ValidateAudience = true`. Es el error más común de este setup.
+   > Sin este mapper el token no lleva `aud` y la API lo rechaza (`ValidateAudience = true`). Es el error más común.
 4. **Realm roles → Create role** → `admin`
-5. **Users → Add user** → asignale el rol en la pestaña **Role mapping**
-
-Probá el token:
-
-```bash
-curl -X POST "http://$KC_IP:8080/realms/poolmanager/protocol/openid-connect/token" \
-  -d "client_id=poolmanager-api" \
-  -d "client_secret=<el secret de la pestaña Credentials>" \
-  -d "username=<tu usuario>" \
-  -d "password=<tu password>" \
-  -d "grant_type=password"
-```
-
-Pegá el `access_token` en <https://jwt.io> y confirmá dos cosas: `"iss": "http://<KC_IP>:8080/realms/poolmanager"` y que `aud` incluya `poolmanager-api`.
-
-Después probá contra la API real:
-
-```bash
-curl https://<tu-url>.ecs.us-east-1.on.aws/players/me \
-  -H "Authorization: Bearer <access_token>"
-```
-
----
-
-## Fase 9 — GitHub Actions (2 min)
-
-Usuario dedicado con permisos mínimos, no el admin de la Fase 0:
-
-```bash
-aws iam create-user --user-name poolmanager-deployer
-
-cat > /tmp/deployer-policy.json <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "ecr:GetAuthorizationToken",
-        "ecr:BatchCheckLayerAvailability",
-        "ecr:InitiateLayerUpload",
-        "ecr:UploadLayerPart",
-        "ecr:CompleteLayerUpload",
-        "ecr:PutImage",
-        "ecr:BatchGetImage"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": ["ecs:UpdateService", "ecs:DescribeServices"],
-      "Resource": "arn:aws:ecs:us-east-1:$ACCOUNT_ID:service/default/poolmanager-api"
-    }
-  ]
-}
-EOF
-
-aws iam put-user-policy --user-name poolmanager-deployer \
-  --policy-name poolmanager-deploy --policy-document file:///tmp/deployer-policy.json
-
-aws iam create-access-key --user-name poolmanager-deployer
-```
-
-GitHub → repo → Settings → Secrets and variables → Actions → **New repository secret**:
-
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-
-Y ahora sí:
-
-```bash
-git push origin main
-```
-
-El pipeline corre tests → buildea → pushea `latest` + SHA a ECR → fuerza el redeploy → espera a que estabilice.
+5. **Users → Add user** → pestaña **Credentials** → set password (Temporary: OFF) → pestaña **Role mapping** → asignale `admin`
+6. **Clients → poolmanager-api → Credentials** → copiá el **Client secret**
 
 ---
 
 ## Verificación final
 
-```bash
-# 1. Health check
-curl https://<url>/health
+Sacá un token:
 
-# 2. Swagger abre
-open https://<url>/swagger
-
-# 3. Endpoint protegido devuelve 401 sin token
-curl -i https://<url>/players
-
-# 4. Con token devuelve 200
-curl https://<url>/players/me -H "Authorization: Bearer <token>"
-
-# 5. La base responde (no es solo el health check)
-curl https://<url>/matches -H "Authorization: Bearer <token>"
-
-# 6. S3 firma URLs
-curl "https://<url>/storage/upload-url?fileName=test.jpg" -H "Authorization: Bearer <token>"
+```powershell
+$KC_IP = "TU_ELASTIC_IP"
+$body = @{
+  client_id     = "poolmanager-api"
+  client_secret = "<client secret>"
+  username      = "<usuario>"
+  password      = "<password>"
+  grant_type    = "password"
+}
+$tok = (Invoke-RestMethod -Method Post -Body $body `
+  -Uri "http://${KC_IP}:8080/realms/poolmanager/protocol/openid-connect/token").access_token
 ```
 
-Si los seis pasan, está terminado.
+Probá:
+
+```powershell
+$API = "https://TU_API_URL"
+$H = @{ Authorization = "Bearer $tok" }
+
+curl.exe "$API/health"                                                      # Healthy
+curl.exe -i "$API/players"                                                  # 401
+Invoke-RestMethod -Uri "$API/players/me" -Headers $H                        # 200
+Invoke-RestMethod -Uri "$API/matches" -Headers $H                           # la base responde
+Invoke-RestMethod -Uri "$API/storage/upload-url?fileName=t.jpg" -Headers $H # S3 firma
+```
+
+Cerrá el loop del CI: hacé cualquier commit y push → el job `deploy` ahora tiene que quedar verde.
 
 ---
 
-## Costo estimado
+## Costo
 
-| Servicio | Aprox. mensual |
+| | ~mensual |
 |---|---|
-| ECS Express (Fargate 0.5 vCPU / 1 GB, 1 tarea) | ~$18 |
-| Application Load Balancer | ~$17 |
-| EC2 t3.small (Keycloak) | ~$15 |
-| Elastic IP (asociada) | $0 |
-| Aurora Serverless v2 (mínimo, free tier el 1er año) | $0–15 |
-| S3 + ECR + CloudWatch | ~$2 |
-| **Total** | **~$52–67/mes** |
-
-Bajarlo: `t3.micro` para Keycloak (−$8) y `--cpu 256 --memory 512` en ECS (−$9). El ALB es el piso duro — es el costo fijo de tener HTTPS con dominio propio.
+| ECS Express (0.5 vCPU / 1 GB) | $18 |
+| Application Load Balancer | $17 |
+| EC2 t3.small | $15 |
+| Aurora Serverless v2 (free tier 1er año) | $0–15 |
+| S3 + ECR + CloudWatch | $2 |
+| **Total** | **~$52–67** |
 
 ---
 
-## Cuando termines: limpiar
+## Borrar todo
 
-```bash
-aws ecs delete-express-gateway-service --service-arn $SERVICE_ARN --monitor-resources
-aws ec2 terminate-instances --instance-ids $KC_INSTANCE
-aws ec2 release-address --allocation-id $EIP_ALLOC
-aws rds delete-db-cluster --db-cluster-identifier poolmanager-db --skip-final-snapshot
-aws s3 rb s3://$BUCKET --force
-aws ecr delete-repository --repository-name poolmanager-api --force
-aws iam delete-user --user-name poolmanager-admin   # borrá antes sus access keys
-```
+En este orden:
 
-Anotá `$SERVICE_ARN`, `$KC_INSTANCE` y `$EIP_ALLOC` en algún lado: si perdés la terminal, la Elastic IP sin asociar sigue cobrándose y es lo que más se olvida.
+1. ECS → `poolmanager-api` → Delete
+2. EC2 → Instances → `poolmanager-keycloak` → Terminate
+3. EC2 → **Elastic IPs** → Release *(si no la liberás te la siguen cobrando)*
+4. RDS → `poolmanager-db` → Delete (skip final snapshot)
+5. S3 → vaciar el bucket → Delete
+6. ECR → `poolmanager-api` → Delete
+7. IAM → borrar `poolmanager-deployer` y los 3 roles
 
 ---
 
 ## Fuentes
 
-- [Amazon ECS Express Mode](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/express-service-overview.html)
-- [Create your first Express Mode service using the AWS CLI](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/express-service-getting-started.html)
-- [CreateExpressGatewayService API](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_CreateExpressGatewayService.html)
-- [Aurora PostgreSQL — Create with express configuration](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/CHAP_GettingStartedAurora.AuroraPostgreSQL.ExpressConfig.html)
-- [Conectarse a Aurora con IAM desde la línea de comandos](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/UsingWithRDS.IAMDBAuth.Connecting.AWSCLI.PostgreSQL.html)
-- [Npgsql — Security and Encryption (GSS Encryption Mode)](https://www.npgsql.org/doc/security.html)
-- [Keycloak — Configuring the hostname (v2)](https://www.keycloak.org/server/hostname)
-- [AWS App Runner](https://aws.amazon.com/apprunner/)
+- [ECS Express Mode — consola](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/express-service-first-run.html)
+- [ECS Express Mode — overview](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/express-service-overview.html)
+- [Aurora PostgreSQL express configuration](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/CHAP_GettingStartedAurora.AuroraPostgreSQL.ExpressConfig.html)
+- [Npgsql — GSS Encryption Mode](https://www.npgsql.org/doc/security.html)
+- [Keycloak — hostname v2](https://www.keycloak.org/server/hostname)
