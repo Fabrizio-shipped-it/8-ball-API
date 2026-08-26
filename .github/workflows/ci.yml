@@ -56,13 +56,27 @@ jobs:
 
       - name: Build, tag, and push image
         env:
-          ECR_REGISTRY: 959015414570.dkr.ecr.us-east-1.amazonaws.com
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
           ECR_REPOSITORY: poolmanager-api
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+                       -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+          # Se pushean las dos tags: la del SHA queda como historial inmutable,
+          # y 'latest' es la que apunta el servicio de ECS. Sin 'latest', el
+          # force-new-deployment vuelve a bajar la MISMA imagen vieja.
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
       - name: Force new ECS deployment
         run: |
-          aws ecs update-service --cluster default --service poolmanager-api --force-new-deployment
+          aws ecs update-service \
+            --cluster default \
+            --service poolmanager-api \
+            --force-new-deployment
+
+      - name: Wait for deployment to stabilize
+        run: |
+          aws ecs wait services-stable \
+            --cluster default \
+            --services poolmanager-api

@@ -30,11 +30,23 @@ public class S3Service
                 configuration["S3:Region"] ?? "us-east-1");
         }
 
-        _s3Client = new AmazonS3Client(
-            configuration["S3:AccessKey"],
-            configuration["S3:SecretKey"],
-            s3Config
-        );
+        var accessKey = configuration["S3:AccessKey"];
+        var secretKey = configuration["S3:SecretKey"];
+
+        if (!string.IsNullOrEmpty(accessKey) && !string.IsNullOrEmpty(secretKey))
+        {
+            // Local (MinIO): credenciales explícitas desde configuración.
+            _s3Client = new AmazonS3Client(accessKey, secretKey, s3Config);
+        }
+        else
+        {
+            // AWS: cadena de credenciales por defecto (task role de ECS).
+            // Sin esto el constructor lanza ArgumentNullException y el contenedor
+            // muere en el arranque antes de responder el health check.
+            _logger.LogInformation(
+                "S3: sin AccessKey/SecretKey en configuración, usando la cadena de credenciales por defecto (task role).");
+            _s3Client = new AmazonS3Client(s3Config);
+        }
 
         _bucketName = configuration["S3:BucketName"] ?? "profile-pictures";
     }
@@ -106,7 +118,10 @@ public class S3Service
             BucketName = _bucketName,
             Key = key,
             Verb = HttpVerb.GET,
-            Expires = DateTime.UtcNow.AddHours(24)
+            // 1 hora, no 24. En ECS las credenciales vienen del task role y son
+            // temporales: la URL pre-firmada deja de ser válida cuando expira el
+            // session token (~6 h), aunque la firma diga 24 h.
+            Expires = DateTime.UtcNow.AddHours(1)
         };
 
         return _s3Client.GetPreSignedURL(request);
