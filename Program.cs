@@ -7,6 +7,7 @@ using PoolManager.Services;
 using Microsoft.OpenApi;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.RateLimiting;
+using PoolManager.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -48,21 +49,32 @@ builder.Services.AddSingleton<S3Service>();
 
 
 // Autenticación JWT con Keycloak
+var keycloakAuthority = builder.Configuration["Keycloak:Authority"]!;
+var keycloakPublicAuthority = builder.Configuration["Keycloak:PublicAuthority"] ?? keycloakAuthority;
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
-        options.Authority = builder.Configuration["Keycloak:Authority"];
+        options.Authority = keycloakAuthority;
         options.Audience = builder.Configuration["Keycloak:ClientId"];
 
-        options.RequireHttpsMetadata = false; // Solo para desarrollo local
+        options.RequireHttpsMetadata = false;
+
+        // Si Authority (IP privada) difiere de PublicAuthority (IP pública/Elastic IP),
+        // reescribir las URLs que Keycloak devuelve en el discovery document
+        // para que el middleware busque las JWKS keys por la IP privada.
+        if (keycloakAuthority != keycloakPublicAuthority)
+        {
+            options.BackchannelHttpHandler = new KeycloakUrlRewriteHandler(
+                keycloakPublicAuthority, keycloakAuthority);
+        }
 
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
             ValidateAudience = true,
             ValidateLifetime = true,
-            ValidIssuer = builder.Configuration["Keycloak:PublicAuthority"] 
-           ?? builder.Configuration["Keycloak:Authority"],
+            ValidIssuer = keycloakPublicAuthority,
             ValidAudience = builder.Configuration["Keycloak:ClientId"]
         };
     });

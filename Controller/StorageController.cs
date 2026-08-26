@@ -19,20 +19,18 @@ public class StorageController : ControllerBase
         _s3Service = s3Service;
     }
 
-    // GET /storage/upload-url?fileName=photo.jpg
+    // GET /storage/upload-url?fileName=photo.jpg&contentType=image/jpeg
     [HttpGet("upload-url")]
-    public IActionResult GetUploadUrl([FromQuery] string fileName)
+    public IActionResult GetUploadUrl(
+        [FromQuery] string fileName,
+        [FromQuery] string contentType = "image/jpeg")
     {
         if (string.IsNullOrWhiteSpace(fileName))
             return BadRequest(new { error = "fileName es requerido" });
 
-        var url = _s3Service.GetUploadUrl(fileName);
+        var (url, key, ct) = _s3Service.GetUploadUrl(fileName, contentType);
 
-        // Extraer la key de la URL para que el cliente la guarde después
-        var uri = new Uri(url);
-        var key = uri.AbsolutePath.TrimStart('/').Replace($"profile-pictures/", "");
-
-        return Ok(new { uploadUrl = url, key });
+        return Ok(new { uploadUrl = url, key, contentType = ct });
     }
 
     // GET /storage/download-url?key=players/guid/photo.jpg

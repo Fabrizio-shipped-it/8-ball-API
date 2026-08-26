@@ -13,9 +13,19 @@ public class S3Service
     {
         var s3Config = new AmazonS3Config
         {
-            ServiceURL = configuration["S3:ServiceUrl"],
-            ForcePathStyle = true // Necesario para MinIO
+            ForcePathStyle = bool.Parse(configuration["S3:ForcePathStyle"] ?? "false")
         };
+
+        var serviceUrl = configuration["S3:ServiceUrl"];
+        if (!string.IsNullOrEmpty(serviceUrl))
+        {
+            s3Config.ServiceURL = serviceUrl;
+        }
+        else
+        {
+            s3Config.RegionEndpoint = Amazon.RegionEndpoint.GetBySystemName(
+                configuration["S3:Region"] ?? "us-east-1");
+        }
 
         _s3Client = new AmazonS3Client(
             configuration["S3:AccessKey"],
@@ -28,28 +38,26 @@ public class S3Service
 
     // Asegura que el bucket exista al iniciar
     public async Task EnsureBucketExists()
-{
-    try
     {
-        // Intenta acceder al bucket directamente
-        await _s3Client.EnsureBucketExistsAsync(_bucketName);
-    }
-    catch
-    {
-        // Si falla, intenta crearlo manualmente
         try
         {
-            await _s3Client.PutBucketAsync(_bucketName);
+            await _s3Client.EnsureBucketExistsAsync(_bucketName);
         }
-        catch (AmazonS3Exception e) when (e.ErrorCode == "BucketAlreadyOwnedByYou")
+        catch
         {
-            // Ya existe, no hay problema
+            try
+            {
+                await _s3Client.PutBucketAsync(_bucketName);
+            }
+            catch (AmazonS3Exception e) when (e.ErrorCode == "BucketAlreadyOwnedByYou")
+            {
+                // Ya existe, no hay problema
+            }
         }
     }
-}
 
     // Genera una URL pre-firmada para SUBIR una imagen
-    public string GetUploadUrl(string fileName)
+    public (string url, string key, string contentType) GetUploadUrl(string fileName, string contentType)
     {
         var key = $"players/{Guid.NewGuid()}/{fileName}";
 
@@ -59,11 +67,12 @@ public class S3Service
             Key = key,
             Verb = HttpVerb.PUT,
             Expires = DateTime.UtcNow.AddMinutes(15),
+            ContentType = contentType
         };
 
         var url = _s3Client.GetPreSignedURL(request);
 
-        return url;
+        return (url, key, contentType);
     }
 
     // Genera una URL pre-firmada para VER una imagen
