@@ -25,7 +25,7 @@ if (useIamAuth)
     {
         return await Amazon.RDS.Util.RDSAuthTokenGenerator.GenerateAuthTokenAsync(
             settings.Host, settings.Port, settings.Username);
-    }, TimeSpan.FromMinutes(14), TimeSpan.FromSeconds(0));
+    }, TimeSpan.FromMinutes(14), TimeSpan.FromSeconds(10));
     var dataSource = dataSourceBuilder.Build();
 
     builder.Services.AddDbContext<AppDbContext>(options =>

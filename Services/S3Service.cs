@@ -8,9 +8,12 @@ public class S3Service
 {
     private readonly IAmazonS3 _s3Client;
     private readonly string _bucketName;
+    private readonly ILogger<S3Service> _logger;
 
-    public S3Service(IConfiguration configuration)
+    public S3Service(IConfiguration configuration, ILogger<S3Service> logger)
     {
+        _logger = logger;
+
         var s3Config = new AmazonS3Config
         {
             ForcePathStyle = bool.Parse(configuration["S3:ForcePathStyle"] ?? "false")
@@ -43,15 +46,35 @@ public class S3Service
         {
             await _s3Client.EnsureBucketExistsAsync(_bucketName);
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex,
+                "No se pudo verificar el bucket '{Bucket}'. Se intenta crearlo.", _bucketName);
+
             try
             {
                 await _s3Client.PutBucketAsync(_bucketName);
+                _logger.LogInformation("Bucket '{Bucket}' creado.", _bucketName);
             }
             catch (AmazonS3Exception e) when (e.ErrorCode == "BucketAlreadyOwnedByYou")
             {
                 // Ya existe, no hay problema
+            }
+            catch (AmazonS3Exception e) when (
+                e.ErrorCode == "InvalidAccessKeyId" ||
+                e.ErrorCode == "SignatureDoesNotMatch" ||
+                e.StatusCode == System.Net.HttpStatusCode.Forbidden)
+            {
+                // Credenciales inválidas: no crashea el arranque, pero queda registrado.
+                // Sin esto el error se pierde y recién aparece como fallo al firmar URLs.
+                _logger.LogError(e,
+                    "Credenciales de S3 inválidas o sin permisos (ErrorCode={ErrorCode}). " +
+                    "Las URLs pre-firmadas van a fallar con SignatureDoesNotMatch. " +
+                    "Revisar S3__AccessKey / S3__SecretKey.", e.ErrorCode);
+            }
+            catch (Exception e)
+            {
+                _logger.LogError(e, "Error inesperado creando el bucket '{Bucket}'.", _bucketName);
             }
         }
     }
