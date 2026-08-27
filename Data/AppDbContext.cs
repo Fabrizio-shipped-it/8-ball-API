@@ -20,7 +20,7 @@ public class AppDbContext : DbContext
             entity.HasIndex(p => p.KeycloakId).IsUnique();
             entity.Property(p => p.KeycloakId).IsRequired();
             entity.Property(p => p.Name).IsRequired();
-            entity.Property(p => p.ProfilePictureUrl).IsRequired();
+            // ProfilePictureKey es opcional: un jugador recién registrado todavía no subió foto.
         });
 
         // Match config

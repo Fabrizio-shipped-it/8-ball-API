@@ -95,3 +95,42 @@ BEGIN
 END $EF$;
 COMMIT;
 
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20260827030000_RenameRankingAndProfileKey') THEN
+    ALTER TABLE "Players" RENAME COLUMN "Ranking" TO "Wins";
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20260827030000_RenameRankingAndProfileKey') THEN
+    ALTER TABLE "Players" RENAME COLUMN "ProfilePictureUrl" TO "ProfilePictureKey";
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20260827030000_RenameRankingAndProfileKey') THEN
+    ALTER TABLE "Players" ALTER COLUMN "ProfilePictureKey" DROP NOT NULL;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20260827030000_RenameRankingAndProfileKey') THEN
+    UPDATE "Players" SET "ProfilePictureKey" = NULL;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20260827030000_RenameRankingAndProfileKey') THEN
+    INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+    VALUES ('20260827030000_RenameRankingAndProfileKey', '10.0.10');
+    END IF;
+END $EF$;
+
+COMMIT;

@@ -16,10 +16,12 @@ API REST para gestionar jugadores y partidas de pool (billar), desarrollada con 
 - **AWS ECR** — Registro de imágenes Docker
 - **GitHub Actions** — CI/CD pipeline
 
-**API en la nube:** https://po-f4ee17d91c17431e9de7c8eb93a36a1c.ecs.us-east-1.on.aws 
+**API en la nube:** https://po-1db0c94e9e5e492fb227412482899df0.ecs.us-east-1.on.aws 
 > La URL base no tiene endpoint en `/`. Para interactuar con la API, usar Swagger o los endpoints listados abajo.
 
-**Swagger UI:** https://po-f4ee17d91c17431e9de7c8eb93a36a1c.ecs.us-east-1.on.aws/swagger
+**Swagger UI:** https://po-1db0c94e9e5e492fb227412482899df0.ecs.us-east-1.on.aws/swagger
+
+**Keycloak:** https://52-73-23-203.sslip.io (HTTPS via Caddy + Let's Encrypt sobre sslip.io)
 
 ## Arquitectura Cloud (AWS)
 
@@ -74,7 +76,24 @@ MINIO_ROOT_USER=minioadmin
 MINIO_ROOT_PASSWORD=minioadmin
 ```
 
-3. **Levantar los contenedores:**
+3. **Crear `appsettings.Development.json`** en la raíz (está en `.gitignore`, no viaja
+   dentro de la imagen Docker):
+
+```json
+{
+  "S3": {
+    "AccessKey": "minioadmin",
+    "SecretKey": "minio_secret_123"
+  }
+}
+```
+
+   Estas claves antes estaban hardcodeadas en `appsettings.json` y terminaban dentro de la
+   imagen. En AWS eso hacía que la API las tomara como válidas, ignorara el task role de ECS
+   y firmara todas las URLs con credenciales de MinIO. Si el archivo no existe, `S3Service`
+   cae en la cadena de credenciales por defecto (que es justo lo que queremos en AWS).
+
+4. **Levantar los contenedores:**
 
 ```bash
 docker compose up -d
@@ -82,7 +101,7 @@ docker compose up -d
 
 Esto inicia PostgreSQL, Keycloak y MinIO.
 
-4. **Configurar Keycloak:**
+5. **Configurar Keycloak:**
 
 - Ir a `http://localhost:8080` y loguearse con las credenciales de admin
 - Crear un realm llamado `poolmanager`
@@ -90,7 +109,7 @@ Esto inicia PostgreSQL, Keycloak y MinIO.
 - Agregar un Audience mapper en el client scope dedicado (Included Client Audience: `poolmanager-api`)
 - Crear un rol de realm `admin` y asignarlo a los usuarios que lo necesiten
 
-5. **Ejecutar la API:**
+6. **Ejecutar la API:**
 
 ```bash
 dotnet run
@@ -105,7 +124,7 @@ La API estará disponible en `http://localhost:5225` y Swagger en `http://localh
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
 | GET | `/players/me` | Usuario | Obtener/auto-registrar perfil propio |
-| PATCH | `/players/me` | Usuario | Actualizar perfil propio |
+| PATCH | `/players/me` | Usuario | Actualizar perfil propio (`profilePictureKey` se valida contra tu carpeta) |
 | GET | `/players` | Admin | Listar jugadores (filtro por `?name=`) |
 | POST | `/players` | Admin | Crear jugador |
 | DELETE | `/players/{id}` | Admin | Eliminar jugador |
@@ -114,18 +133,18 @@ La API estará disponible en `http://localhost:5225` y Swagger en `http://localh
 
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
-| POST | `/matches` | Usuario | Crear partida |
-| GET | `/matches` | Usuario | Listar partidas (filtros: `?date=`, `?status=`) |
-| GET | `/matches/{id}` | Usuario | Ver detalle de partida |
-| PATCH | `/matches/{id}` | Usuario | Actualizar partida / asignar ganador |
+| POST | `/matches` | Participante | Crear partida (solo si sos uno de los dos jugadores) |
+| GET | `/matches` | Usuario | Listar **tus** partidas (`?date=`, `?status=`). `?all=true` solo admin |
+| GET | `/matches/{id}` | Participante | Ver detalle (404 si no participás) |
+| PATCH | `/matches/{id}` | Participante | Actualizar partida / asignar ganador |
 | DELETE | `/matches/{id}` | Admin | Eliminar partida |
 
 ### Otros
 
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
-| GET | `/storage/upload-url?fileName=` | Usuario | URL pre-firmada para subir imagen |
-| GET | `/storage/download-url?fileName=` | Usuario | URL pre-firmada para descargar imagen |
+| GET | `/storage/upload-url?fileName=&contentType=` | Usuario | URL pre-firmada para subir (5 min, key bajo `players/{tuId}/`) |
+| GET | `/storage/download-url?key=` | Usuario | URL pre-firmada para descargar (1 h, solo keys tuyas o fotos publicadas) |
 | GET | `/health` | Público | Healthcheck |
 
 ## Tests
@@ -136,14 +155,33 @@ dotnet test PoolManager.slnx
 
 ## Seguridad implementada
 
-- Autenticación JWT vía Keycloak
-- Autorización por roles (admin/usuario)
+- Autenticación JWT vía Keycloak sobre HTTPS
+- Autorización por roles (admin/usuario). Los roles de Keycloak vienen anidados en
+  `realm_access.roles`; se mapean a `ClaimTypes.Role` en `OnTokenValidated`, sin eso
+  `[Authorize(Roles = "admin")]` nunca matchea
+- **Control de pertenencia en Matches**: solo los participantes (o un admin) pueden ver,
+  modificar o declarar ganador. A un tercero se le devuelve 404, no 403, para no confirmar
+  que la partida existe
+- **Aislamiento en S3**: las keys viven en `players/{playerId}/`. La API solo firma URLs
+  para keys propias o para fotos de perfil publicadas, y verifica con `GetObjectMetadata`
+  que el objeto exista antes de guardarlo
+- La base guarda la **key** de S3, no la URL: el nombre del bucket y la región no se
+  exponen al cliente
 - Validación de input con Data Annotations
+- Formato de error uniforme `{ "error": "..." }`, incluidos los fallos de deserialización
+  (que por defecto filtran path del JSON, línea y tipo .NET esperado)
 - Rate limiting (100 req/min general, 5 req/15min auth)
 - Manejo global de excepciones (sin exponer stack traces)
 - Índice en StartTime para performance
 - Detección de double-booking en partidas
 - Logging estructurado con ILogger
+
+### Limitación conocida: URLs pre-firmadas
+
+Una URL pre-firmada de S3 es válida hasta que expira y **no se puede invalidar después de
+usarla**: el single-use no existe de forma nativa. Se mitiga con una ventana corta (5 min),
+una key única por request (dos subidas nunca se pisan) y la confirmación server-side de que
+el objeto existe antes de asociarlo al perfil.
 
 ## CI/CD
 

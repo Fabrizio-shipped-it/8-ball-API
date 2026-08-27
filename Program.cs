@@ -1,4 +1,7 @@
+using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
@@ -75,7 +78,47 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateAudience = true,
             ValidateLifetime = true,
             ValidIssuer = keycloakPublicAuthority,
-            ValidAudience = builder.Configuration["Keycloak:ClientId"]
+            ValidAudience = builder.Configuration["Keycloak:ClientId"],
+            RoleClaimType = ClaimTypes.Role
+        };
+
+        // Keycloak no emite los roles como claims planos: los mete anidados en
+        // "realm_access": { "roles": [...] }. El middleware de .NET no sabe leer
+        // esa estructura, así que sin este mapeo User.IsInRole("admin") siempre
+        // da false y TODOS los endpoints [Authorize(Roles = "admin")] responden
+        // 403, incluso para un admin legítimo.
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = context =>
+            {
+                if (context.Principal?.Identity is not ClaimsIdentity identity)
+                    return Task.CompletedTask;
+
+                var realmAccess = identity.FindFirst("realm_access")?.Value;
+                if (string.IsNullOrWhiteSpace(realmAccess))
+                    return Task.CompletedTask;
+
+                try
+                {
+                    using var doc = JsonDocument.Parse(realmAccess);
+                    if (doc.RootElement.TryGetProperty("roles", out var roles)
+                        && roles.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var role in roles.EnumerateArray())
+                        {
+                            var name = role.GetString();
+                            if (!string.IsNullOrWhiteSpace(name))
+                                identity.AddClaim(new Claim(ClaimTypes.Role, name));
+                        }
+                    }
+                }
+                catch (JsonException)
+                {
+                    // Token con realm_access malformado: se sigue sin roles.
+                }
+
+                return Task.CompletedTask;
+            }
         };
     });
 
@@ -83,6 +126,30 @@ builder.Services.AddAuthorization();
 
 // Controllers (MVC)
 builder.Services.AddControllers();
+
+// Formato único de error para toda la API: { "error": "..." }
+//
+// Los errores de validación y de deserialización JSON los produce el model binding,
+// ANTES de entrar al controller, así que no se pueden atrapar con un try/catch.
+// Por defecto ASP.NET devuelve un ProblemDetails que incluye el path del JSON,
+// el número de línea y el tipo .NET esperado — información interna que no le
+// sirve al cliente y que describe la implementación.
+builder.Services.Configure<ApiBehaviorOptions>(options =>
+{
+    options.InvalidModelStateResponseFactory = context =>
+    {
+        var message = context.ModelState
+            .Where(kv => kv.Value is not null && kv.Value.Errors.Count > 0)
+            .SelectMany(kv => kv.Value!.Errors)
+            .Select(e => e.ErrorMessage)
+            // Un ErrorMessage vacío significa que falló la deserialización (hay
+            // una Exception adjunta). Ese texto nunca se expone.
+            .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m))
+            ?? "El formato del request no es válido";
+
+        return new BadRequestObjectResult(new { error = message });
+    };
+});
 
 // Swagger
 builder.Services.AddEndpointsApiExplorer();
