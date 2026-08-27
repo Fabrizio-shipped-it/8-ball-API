@@ -1,7 +1,6 @@
 using System.Text.RegularExpressions;
 using Amazon.S3;
 using Amazon.S3.Model;
-using Amazon.S3.Util;
 
 namespace PoolManager.Services;
 
@@ -10,6 +9,10 @@ public class S3Service
     private readonly IAmazonS3 _s3Client;
     private readonly string _bucketName;
     private readonly ILogger<S3Service> _logger;
+
+    /// True cuando hay S3:ServiceUrl configurada, es decir MinIO en local.
+    /// En AWS es false y el servicio no intenta crear nada.
+    private readonly bool _isLocalStorage;
 
     /// Ventana corta a propósito. Una URL pre-firmada de S3 NO se puede invalidar
     /// después de usarla (no existe el single-use nativo), así que lo único que
@@ -29,7 +32,9 @@ public class S3Service
         };
 
         var serviceUrl = configuration["S3:ServiceUrl"];
-        if (!string.IsNullOrEmpty(serviceUrl))
+        _isLocalStorage = !string.IsNullOrEmpty(serviceUrl);
+
+        if (_isLocalStorage)
         {
             s3Config.ServiceURL = serviceUrl;
         }
@@ -60,42 +65,64 @@ public class S3Service
         _bucketName = configuration["S3:BucketName"] ?? "profile-pictures";
     }
 
-    // Asegura que el bucket exista al iniciar
+    /// Chequeo de arranque del bucket.
+    ///
+    /// En AWS el bucket lo crea la infraestructura y el task role NO tiene
+    /// s3:CreateBucket, a propósito: una aplicación no debería poder crear
+    /// buckets. Autocrearlo es una comodidad de desarrollo local, porque MinIO
+    /// arranca vacío en cada `docker compose up`.
+    ///
+    /// Antes esto intentaba crear el bucket siempre, fallaba con AccessDenied en
+    /// producción y lo reportaba como "credenciales inválidas" — un mensaje que
+    /// apunta al lugar equivocado y hace perder tiempo revisando claves que están bien.
     public async Task EnsureBucketExists()
+    {
+        if (_isLocalStorage)
+        {
+            await EnsureBucketExistsLocal();
+            return;
+        }
+
+        try
+        {
+            // Solo verifica acceso. Requiere s3:GetBucketLocation, que sí está en el task role.
+            await _s3Client.GetBucketLocationAsync(_bucketName);
+            _logger.LogInformation("Bucket '{Bucket}': acceso verificado.", _bucketName);
+        }
+        catch (AmazonS3Exception e) when (e.ErrorCode == "NoSuchBucket")
+        {
+            _logger.LogError(
+                "El bucket '{Bucket}' no existe. Crealo en S3 o corregí S3__BucketName.", _bucketName);
+        }
+        catch (AmazonS3Exception e)
+        {
+            _logger.LogError(e,
+                "No se pudo verificar el bucket '{Bucket}' (ErrorCode={ErrorCode}). " +
+                "Revisar que el task role tenga s3:GetBucketLocation sobre ese bucket.",
+                _bucketName, e.ErrorCode);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Error inesperado verificando el bucket '{Bucket}'.", _bucketName);
+        }
+    }
+
+    /// Solo para MinIO en local: crea el bucket si todavía no existe.
+    private async Task EnsureBucketExistsLocal()
     {
         try
         {
-            await _s3Client.EnsureBucketExistsAsync(_bucketName);
+            await _s3Client.PutBucketAsync(_bucketName);
+            _logger.LogInformation("Bucket local '{Bucket}' creado.", _bucketName);
         }
-        catch (Exception ex)
+        catch (AmazonS3Exception e) when (
+            e.ErrorCode is "BucketAlreadyOwnedByYou" or "BucketAlreadyExists")
         {
-            _logger.LogWarning(ex,
-                "No se pudo verificar el bucket '{Bucket}'. Se intenta crearlo.", _bucketName);
-
-            try
-            {
-                await _s3Client.PutBucketAsync(_bucketName);
-                _logger.LogInformation("Bucket '{Bucket}' creado.", _bucketName);
-            }
-            catch (AmazonS3Exception e) when (e.ErrorCode == "BucketAlreadyOwnedByYou")
-            {
-                // Ya existe, no hay problema
-            }
-            catch (AmazonS3Exception e) when (
-                e.ErrorCode == "InvalidAccessKeyId" ||
-                e.ErrorCode == "SignatureDoesNotMatch" ||
-                e.StatusCode == System.Net.HttpStatusCode.Forbidden)
-            {
-                // Credenciales inválidas: no crashea el arranque, pero queda registrado.
-                _logger.LogError(e,
-                    "Credenciales de S3 inválidas o sin permisos (ErrorCode={ErrorCode}). " +
-                    "Las URLs pre-firmadas van a fallar con SignatureDoesNotMatch. " +
-                    "Revisar S3__AccessKey / S3__SecretKey.", e.ErrorCode);
-            }
-            catch (Exception e)
-            {
-                _logger.LogError(e, "Error inesperado creando el bucket '{Bucket}'.", _bucketName);
-            }
+            // Ya existe, no hay problema.
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "No se pudo preparar el bucket local '{Bucket}'.", _bucketName);
         }
     }
 
