@@ -62,21 +62,40 @@ jobs:
         run: |
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
                        -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
-          # Se pushean las dos tags: la del SHA queda como historial inmutable,
-          # y 'latest' es la que apunta el servicio de ECS. Sin 'latest', el
-          # force-new-deployment vuelve a bajar la MISMA imagen vieja.
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
-      - name: Force new ECS deployment
+      # Express Mode fija el digest de la imagen al crear el servicio, así que
+      # `update-service --force-new-deployment` relanza SIEMPRE el mismo binario
+      # y el deploy no cambia nada. Hay que pasarle explícitamente la imagen nueva
+      # con la API de Express Mode.
+      #
+      # Se manda la tag del SHA, no 'latest': cada deploy queda apuntando a una
+      # imagen inmutable distinta, que es lo que hace que Express detecte el cambio.
+      - name: Deploy new image to ECS Express
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          ECR_REPOSITORY: poolmanager-api
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          aws ecs update-service \
-            --cluster default \
-            --service poolmanager-api \
-            --force-new-deployment
+          set -euo pipefail
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          SERVICE_ARN="arn:aws:ecs:us-east-1:${ACCOUNT_ID}:service/default/poolmanager-api"
+          NEW_IMAGE="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
 
-      - name: Wait for deployment to stabilize
-        run: |
-          aws ecs wait services-stable \
-            --cluster default \
-            --services poolmanager-api
+          # Se parte de la config actual del contenedor y se le cambia SOLO la
+          # imagen. Si se mandara un primaryContainer armado a mano se perderían
+          # las variables de entorno (connection string, Keycloak, S3).
+          aws ecs describe-express-gateway-service \
+            --service-arn "$SERVICE_ARN" \
+            --query 'service.activeConfigurations[0].primaryContainer' \
+            --output json > container.json
+
+          jq --arg img "$NEW_IMAGE" '.image = $img' container.json > container-new.json
+
+          echo "Imagen nueva: $NEW_IMAGE"
+          jq '.environment |= map(if (.name | test("Connection|Secret")) then .value = "***" else . end)' container-new.json
+
+          aws ecs update-express-gateway-service \
+            --service-arn "$SERVICE_ARN" \
+            --primary-container file://container-new.json
