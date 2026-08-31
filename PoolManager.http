@@ -1,6 +1,0 @@
-@PoolManager_HostAddress = http://localhost:5225
-
-GET {{PoolManager_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###

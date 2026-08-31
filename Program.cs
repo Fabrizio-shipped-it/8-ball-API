@@ -58,9 +58,13 @@ builder.Services.AddScoped<MatchService>();
 builder.Services.AddSingleton<S3Service>();
 
 
-// Autenticación JWT con Keycloak
+// Autenticación JWT con Keycloak.
+//
+// Keycloak se expone por una única dirección pública (HTTPS via Caddy), así que
+// la URL con la que se descarga el discovery document y la que figura como
+// emisor dentro del token son la misma. Cuando convivían una IP privada y una
+// pública había que reescribir las URLs del discovery; eso ya no aplica.
 var keycloakAuthority = builder.Configuration["Keycloak:Authority"]!;
-var keycloakPublicAuthority = builder.Configuration["Keycloak:PublicAuthority"] ?? keycloakAuthority;
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -70,21 +74,12 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
         options.RequireHttpsMetadata = false;
 
-        // Si Authority (IP privada) difiere de PublicAuthority (IP pública/Elastic IP),
-        // reescribir las URLs que Keycloak devuelve en el discovery document
-        // para que el middleware busque las JWKS keys por la IP privada.
-        if (keycloakAuthority != keycloakPublicAuthority)
-        {
-            options.BackchannelHttpHandler = new KeycloakUrlRewriteHandler(
-                keycloakPublicAuthority, keycloakAuthority);
-        }
-
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
             ValidateAudience = true,
             ValidateLifetime = true,
-            ValidIssuer = keycloakPublicAuthority,
+            ValidIssuer = keycloakAuthority,
             ValidAudience = builder.Configuration["Keycloak:ClientId"],
             RoleClaimType = ClaimTypes.Role
         };
