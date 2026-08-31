@@ -9,9 +9,14 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   keycloak:
-    image: quay.io/keycloak/keycloak:latest
+    image: quay.io/keycloak/keycloak:26.4
     container_name: poolmanager-keycloak
     command: start-dev
     env_file: .env
@@ -23,7 +28,8 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
   minio:
     image: minio/minio
@@ -35,25 +41,39 @@ services:
       - "9001:9001"
     volumes:
       - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   api:
-      build:
-        context: .
-        dockerfile: Dockerfile
-      container_name: poolmanager-api
-      env_file: .env
-      environment:
-        ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
-        Keycloak__Authority: "http://keycloak:8080/realms/poolmanager"
-        S3__ServiceUrl: "http://minio:9000"
-        S3__AccessKey: "${MINIO_ROOT_USER}"
-        S3__SecretKey: "${MINIO_ROOT_PASSWORD}"
-      ports:
-        - "5225:8080"
-      depends_on:
-        - postgres
-        - keycloak
-        - minio
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: poolmanager-api
+    env_file: .env
+    environment:
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Keycloak__Authority: "http://keycloak:8080/realms/poolmanager"
+      S3__ServiceUrl: "http://minio:9000"
+      S3__AccessKey: "${MINIO_ROOT_USER}"
+      S3__SecretKey: "${MINIO_ROOT_PASSWORD}"
+    ports:
+      - "5225:8080"
+    # Con `depends_on` a secas Docker solo espera a que el contenedor arranque,
+    # no a que el servicio esté listo. La API llegaba a Postgres antes de que
+    # aceptara conexiones y fallaba la primera query.
+    #
+    # Keycloak queda sin condition a propósito: tarda ~40s en estar listo y la
+    # API no lo necesita para arrancar (solo al validar el primer token).
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
 
 volumes:
   pgdata:

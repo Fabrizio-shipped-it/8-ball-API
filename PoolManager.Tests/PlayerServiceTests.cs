@@ -104,11 +104,49 @@ public class PlayerServiceTests
 
         var player = await service.Create(new CreatePlayerDto { Name = "A borrar" }, keycloakId);
 
-        var deleted = await service.Delete(player.Id);
+        var (success, error, conflict) = await service.Delete(player.Id);
         var found = await service.GetByKeycloakId(keycloakId);
 
-        Assert.True(deleted);
+        Assert.True(success);
+        Assert.Null(error);
+        Assert.False(conflict);
         Assert.Null(found);
+    }
+
+    [Fact]
+    public async Task Delete_ReturnsNotFoundForUnknownPlayer()
+    {
+        var service = NewService(out _);
+
+        var (success, _, conflict) = await service.Delete(9999);
+
+        Assert.False(success);
+        Assert.False(conflict); // no es conflicto, simplemente no existe
+    }
+
+    [Fact]
+    public async Task Delete_RejectsPlayerWithMatches()
+    {
+        // La FK es Restrict: antes esto explotaba con DbUpdateException y el
+        // usuario recibía un 500 sin explicación.
+        var service = NewService(out var context);
+
+        var p1 = await service.Create(new CreatePlayerDto { Name = "Con partidas" }, Guid.NewGuid().ToString());
+        var p2 = await service.Create(new CreatePlayerDto { Name = "Rival" }, Guid.NewGuid().ToString());
+
+        context.Matches.Add(new Match
+        {
+            Player1Id = p1.Id,
+            Player2Id = p2.Id,
+            StartTime = DateTime.UtcNow.AddHours(2)
+        });
+        await context.SaveChangesAsync();
+
+        var (success, error, conflict) = await service.Delete(p1.Id);
+
+        Assert.False(success);
+        Assert.True(conflict);
+        Assert.Contains("partida", error);
     }
 
     [Fact]

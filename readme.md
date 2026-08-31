@@ -44,10 +44,12 @@ La API está desplegada en AWS con la siguiente arquitectura:
 
 - Autenticación IAM para Aurora (sin contraseñas en connection strings)
 - Tokens RDS generados con `RDSAuthTokenGenerator`, rotación cada 14 minutos
-- Security groups restrictivos (solo IPs necesarias)
+- Security group de Keycloak con 8080, 80 y 443 abiertos a internet. Es necesario: las
+  tareas de Fargate tienen IP pública dinámica y Let's Encrypt valida por el puerto 80.
+  El acceso real lo controla Keycloak, no la red
 - Principio de mínimo privilegio en IAM (`poolmanager-deployer` solo tiene ECR, S3, ECS, RDS connect)
 - SSL obligatorio en conexión a Aurora
-- Elastic IP en EC2 para IP fija de Keycloak
+- Elastic IP en EC2 para IP fija de Keycloak, con HTTPS via Caddy + Let's Encrypt sobre sslip.io
 
 ## Requisitos previos
 
@@ -145,7 +147,8 @@ La API estará disponible en `http://localhost:5225` y Swagger en `http://localh
 |--------|------|------|-------------|
 | GET | `/storage/upload-url?fileName=&contentType=` | Usuario | URL pre-firmada para subir (5 min, key bajo `players/{tuId}/`) |
 | GET | `/storage/download-url?key=` | Usuario | URL pre-firmada para descargar (1 h, solo keys tuyas o fotos publicadas) |
-| GET | `/health` | Público | Healthcheck |
+| GET | `/health` | Público | Liveness. No toca la base — es el health check del ALB |
+| GET | `/health/ready` | Público | Readiness. Verifica la conexión a la base |
 
 ## Tests
 
@@ -170,10 +173,21 @@ dotnet test PoolManager.slnx
 - Validación de input con Data Annotations
 - Formato de error uniforme `{ "error": "..." }`, incluidos los fallos de deserialización
   (que por defecto filtran path del JSON, línea y tipo .NET esperado)
-- Rate limiting (100 req/min general, 5 req/15min auth)
-- Manejo global de excepciones (sin exponer stack traces)
+- Rate limiting: 100 req/min general, y 20 req/5min sobre `/storage`, que es el vector
+  real de abuso (cada llamada firma una URL que habilita a escribir en el bucket)
+- Manejo global de excepciones (sin exponer stack traces), con un `traceId` en el 500
+  que permite correlacionar el reporte de un usuario con el log en CloudWatch
+- Respuestas de error uniformes también en los códigos que el framework emite sin cuerpo:
+  401, 403, 404 de ruta inexistente, 405 y 429
 - Índice en StartTime para performance
-- Detección de double-booking en partidas
+- Detección de double-booking, tanto de jugadores como de **mesas**: dos partidas no
+  pueden compartir mesa en horarios solapados
+- Validación de horarios: la hora de fin debe ser posterior a la de inicio, una partida
+  no puede durar más de 12 h, y no se puede agendar en el pasado
+- Reintento automático ante fallas transitorias de la base (`EnableRetryOnFailure`), que
+  cubre los cold starts de Aurora Serverless
+- Auto-registro resistente a concurrencia: dos logins simultáneos del mismo usuario nuevo
+  no rompen con violación de unicidad
 - Logging estructurado con ILogger
 
 ### Limitación conocida: URLs pre-firmadas
@@ -188,23 +202,46 @@ el objeto existe antes de asociarlo al perfil.
 El pipeline (`.github/workflows/ci.yml`) se ejecuta en cada push a `main`:
 
 1. **CI** — Restore, build y test del proyecto
-2. **CD** — Build de imagen Docker, push a ECR, redeploy en ECS
+2. **CD** — Build de la imagen, push a ECR con dos tags (el SHA del commit y `latest`),
+   y despliegue con `update-express-gateway-service` pasando la tag del SHA.
+
+El paso de despliegue lee el `primaryContainer` actual del servicio y le reemplaza
+únicamente el campo `image`, de modo que las variables de entorno (connection string,
+Keycloak, S3) sobreviven al deploy.
 
 Los secrets `AWS_ACCESS_KEY_ID` y `AWS_SECRET_ACCESS_KEY` deben estar configurados en GitHub → Settings → Secrets → Actions.
 
 ## Deploy manual
- 
-Si necesitás hacer un deploy manual sin pasar por el pipeline:
+
+Si necesitás desplegar sin pasar por el pipeline:
 
 ```bash
-# Login a ECR
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 959015414570.dkr.ecr.us-east-1.amazonaws.com
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+REGISTRY=$ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com
+TAG=$(git rev-parse HEAD)
 
-# Build y push
-docker build -t poolmanager-api .
-docker tag poolmanager-api:latest 959015414570.dkr.ecr.us-east-1.amazonaws.com/poolmanager-api:latest
-docker push 959015414570.dkr.ecr.us-east-1.amazonaws.com/poolmanager-api:latest
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $REGISTRY
 
-# Redeploy en ECS
-aws ecs update-service --cluster default --service poolmanager-api --force-new-deployment
+docker build -t $REGISTRY/poolmanager-api:$TAG .
+docker push $REGISTRY/poolmanager-api:$TAG
+
+SERVICE_ARN="arn:aws:ecs:us-east-1:$ACCOUNT_ID:service/default/poolmanager-api"
+
+# Se parte de la config actual del contenedor y se le cambia SOLO la imagen,
+# para no perder las variables de entorno.
+aws ecs describe-express-gateway-service --service-arn "$SERVICE_ARN" \
+  --query 'service.activeConfigurations[0].primaryContainer' --output json > container.json
+
+jq --arg img "$REGISTRY/poolmanager-api:$TAG" '.image = $img' container.json > container-new.json
+
+aws ecs update-express-gateway-service \
+  --service-arn "$SERVICE_ARN" \
+  --primary-container file://container-new.json \
+  --monitor-resources
 ```
+
+> **No uses `aws ecs update-service --force-new-deployment`.** ECS Express Mode fija el
+> digest de la imagen cuando se crea el servicio, así que ese comando relanza siempre el
+> mismo binario: el deploy termina en verde y no cambia absolutamente nada. Hay que pasarle
+> la imagen nueva explícitamente con la API de Express Mode, y con una tag distinta en cada
+> deploy (por eso se usa el SHA del commit y no `latest`).

@@ -34,7 +34,27 @@ public class PlayerService
                 ProfilePictureKey = null // todavía no subió foto
             };
             _context.Players.Add(player);
-            await _context.SaveChangesAsync();
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException)
+            {
+                // Dos requests simultáneos del mismo usuario nuevo (por ejemplo, un
+                // front que dispara varias llamadas al iniciar sesión) intentan
+                // insertar dos veces. El índice único de KeycloakId rechaza el
+                // segundo y eso salía como 500. Acá se descarta el insert perdedor
+                // y se relee la fila que ganó la carrera.
+                _context.Entry(player).State = EntityState.Detached;
+
+                player = await _context.Players.FirstOrDefaultAsync(p => p.KeycloakId == keycloakId);
+
+                if (player == null) throw; // no era una colisión de unicidad
+
+                _logger.LogInformation(
+                    "Auto-registro concurrente resuelto para el jugador {PlayerId}", player.Id);
+            }
         }
 
         return await MapToDto(player);
@@ -110,15 +130,30 @@ public class PlayerService
     }
 
     // DELETE /players/:id (admin)
-    public async Task<bool> Delete(int id)
+    //
+    // Devuelve el motivo del fallo para que el controller elija el status code.
+    // Antes devolvía solo bool: si el jugador tenía partidas, la FK con
+    // DeleteBehavior.Restrict hacía explotar SaveChanges con DbUpdateException
+    // y el usuario recibía un 500 sin explicación.
+    public async Task<(bool Success, string? Error, bool Conflict)> Delete(int id)
     {
         var player = await _context.Players.FindAsync(id);
-        if (player == null) return false;
+        if (player == null)
+            return (false, "Jugador no encontrado", false);
+
+        var partidas = await _context.Matches
+            .CountAsync(m => m.Player1Id == id || m.Player2Id == id);
+
+        if (partidas > 0)
+            return (false,
+                $"No se puede eliminar: el jugador tiene {partidas} partida(s) asociada(s). " +
+                "Eliminá primero sus partidas.",
+                true);
 
         _context.Players.Remove(player);
         await _context.SaveChangesAsync();
         _logger.LogInformation("Jugador eliminado: {PlayerId} - {PlayerName}", player.Id, player.Name);
-        return true;
+        return (true, null, false);
     }
 
     /// True si esa key está referenciada como foto de perfil de algún jugador.

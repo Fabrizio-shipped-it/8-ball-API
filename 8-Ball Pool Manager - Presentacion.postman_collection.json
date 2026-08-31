@@ -1,0 +1,1023 @@
+{
+  "info": {
+    "_postman_id": "b2f3a1d0-pool-8ball-demo-collection",
+    "name": "8-Ball Pool Manager - Presentación",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "50262922"
+  },
+  "variable": [
+    {
+      "key": "api_url",
+      "value": "https://po-1db0c94e9e5e492fb227412482899df0.ecs.us-east-1.on.aws"
+    },
+    {
+      "key": "keycloak_url",
+      "value": "https://52-73-23-203.sslip.io"
+    },
+    {
+      "key": "client_secret",
+      "value": ""
+    },
+    {
+      "key": "user1",
+      "value": "testuser"
+    },
+    {
+      "key": "pass1",
+      "value": "test1234"
+    },
+    {
+      "key": "user2",
+      "value": "testuser2"
+    },
+    {
+      "key": "pass2",
+      "value": "test1234"
+    },
+    {
+      "key": "token1",
+      "value": ""
+    },
+    {
+      "key": "token2",
+      "value": ""
+    },
+    {
+      "key": "upload_url",
+      "value": ""
+    },
+    {
+      "key": "file_key",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "01 - Autenticación",
+      "item": [
+        {
+          "name": "1.1 Obtener token - testuser",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "poolmanager-api",
+                  "type": "text"
+                },
+                {
+                  "key": "username",
+                  "value": "{{user1}}",
+                  "type": "text"
+                },
+                {
+                  "key": "password",
+                  "value": "{{pass1}}",
+                  "type": "text"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{client_secret}}",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{keycloak_url}}/realms/poolmanager/protocol/openid-connect/token",
+              "host": [
+                "{{keycloak_url}}"
+              ],
+              "path": [
+                "realms",
+                "poolmanager",
+                "protocol",
+                "openid-connect",
+                "token"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    pm.collectionVariables.set('token1', pm.response.json().access_token);",
+                  "} else { console.log('Error ' + pm.response.code + ': ' + pm.response.text()); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "1.2 Obtener token - testuser2",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "poolmanager-api",
+                  "type": "text"
+                },
+                {
+                  "key": "username",
+                  "value": "{{user2}}",
+                  "type": "text"
+                },
+                {
+                  "key": "password",
+                  "value": "{{pass2}}",
+                  "type": "text"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{client_secret}}",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{keycloak_url}}/realms/poolmanager/protocol/openid-connect/token",
+              "host": [
+                "{{keycloak_url}}"
+              ],
+              "path": [
+                "realms",
+                "poolmanager",
+                "protocol",
+                "openid-connect",
+                "token"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    pm.collectionVariables.set('token2', pm.response.json().access_token);",
+                  "} else { console.log('Error ' + pm.response.code + ': ' + pm.response.text()); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 - Players (Bearer Token)",
+      "item": [
+        {
+          "name": "2.1 Auto-registro / obtener perfil (GET /players/me)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token1}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api_url}}/players/me",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "players",
+                "me"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2.2 Auto-registro player 2 (GET /players/me)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token2}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api_url}}/players/me",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "players",
+                "me"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2.3 Actualizar perfil (PATCH /players/me)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token1}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PATCH",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Fabrizio\",\n  \"preferredCue\": \"Viking Valhalla\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{api_url}}/players/me",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "players",
+                "me"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "03 - Matches (Bearer Token)",
+      "item": [
+        {
+          "name": "3.1 Crear partida (POST /matches)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token1}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"player1Id\": 1,\n  \"player2Id\": 2,\n  \"startTime\": \"2026-09-01T15:00:00Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{api_url}}/matches",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "matches"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.2 Listar MIS partidas (GET /matches)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token1}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api_url}}/matches",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "matches"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.3 Ver partida por ID (GET /matches/1)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token1}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api_url}}/matches/1",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "matches",
+                "1"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.4 Declarar ganador (PATCH /matches/1)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token1}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PATCH",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"winnerId\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{api_url}}/matches/1",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "matches",
+                "1"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.5 Verificar ranking actualizado (GET /players/me)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token1}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api_url}}/players/me",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "players",
+                "me"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "04 - Storage / S3 (Bearer Token)",
+      "item": [
+        {
+          "name": "4.1 Obtener URL de subida (GET /storage/upload-url)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token1}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api_url}}/storage/upload-url?fileName=foto-perfil.jpg",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "storage",
+                "upload-url"
+              ],
+              "query": [
+                {
+                  "key": "fileName",
+                  "value": "foto-perfil.jpg"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const r = pm.response.json();",
+                  "pm.collectionVariables.set('upload_url', r.uploadUrl);",
+                  "pm.collectionVariables.set('file_key', r.key);",
+                  "console.log('key: ' + r.key);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.2 Subir imagen a S3 (PUT a {{upload_url}})",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "file",
+              "file": {
+                "src": ""
+              }
+            },
+            "url": {
+              "raw": "{{upload_url}}",
+              "host": [
+                "{{upload_url}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.3 Actualizar foto de perfil (PATCH /players/me)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token1}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PATCH",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"profilePictureKey\": \"{{file_key}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{api_url}}/players/me",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "players",
+                "me"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.4 Obtener URL de descarga (GET /storage/download-url)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token1}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api_url}}/storage/download-url?key={{file_key}}",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "storage",
+                "download-url"
+              ],
+              "query": [
+                {
+                  "key": "key",
+                  "value": "{{file_key}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "05 - Validaciones (deben fallar)",
+      "item": [
+        {
+          "name": "5.1 Jugador contra si mismo (debe dar 400)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token1}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"player1Id\": 1,\n  \"player2Id\": 1,\n  \"startTime\": \"2026-09-02T15:00:00Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{api_url}}/matches",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "matches"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "5.2 Ganador invalido (debe dar 400)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token1}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PATCH",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"winnerId\": 9999\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{api_url}}/matches/1",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "matches",
+                "1"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "5.3 Request sin token (debe dar 401)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api_url}}/players/me",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "players",
+                "me"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "5.4 Listar TODAS las partidas sin ser admin (403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token1}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{api_url}}/matches?all=true",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "matches"
+              ],
+              "query": [
+                {
+                  "key": "all",
+                  "value": "true"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "5.5 Usar la imagen de otro jugador (400)",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token2}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"profilePictureKey\": \"{{file_key}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{api_url}}/players/me",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "players",
+                "me"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "5.6 Firmar una key ajena (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token1}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{api_url}}/storage/download-url?key=players/999/no-existe.jpg",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "storage",
+                "download-url"
+              ],
+              "query": [
+                {
+                  "key": "key",
+                  "value": "players/999/no-existe.jpg"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "5.7 Fin anterior al inicio (400)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "description": "La partida terminaria antes de empezar.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token1}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"player1Id\": 1,\n  \"player2Id\": 2,\n  \"startTime\": \"2026-12-01T15:00:00Z\",\n  \"endTime\": \"2026-12-01T14:00:00Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{api_url}}/matches",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "matches"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "5.8 Partida en el pasado (400)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token1}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"player1Id\": 1,\n  \"player2Id\": 2,\n  \"startTime\": \"2020-01-01T15:00:00Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{api_url}}/matches",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "matches"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "5.9 Mesa ocupada en el mismo horario (409)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "description": "Correr DOS VECES: la primera crea (201), la segunda debe dar 409 por la mesa.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token1}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"player1Id\": 1,\n  \"player2Id\": 2,\n  \"startTime\": \"2026-12-05T15:00:00Z\",\n  \"endTime\": \"2026-12-05T16:00:00Z\",\n  \"tableNumber\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{api_url}}/matches",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "matches"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "5.10 Ruta inexistente (404 con body JSON)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "Antes devolvia 404 con el cuerpo vacio.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token1}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{api_url}}/jugadores",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "jugadores"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "5.11 Sin token (401 con body JSON)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "Antes devolvia 401 con el cuerpo vacio.",
+            "url": {
+              "raw": "{{api_url}}/players/me",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "players",
+                "me"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "5.12 Borrar jugador con partidas (409)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "description": "Requiere rol admin. Antes tiraba 500 por la FK Restrict.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token1}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{api_url}}/players/1",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "players",
+                "1"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "06 - Health (público)",
+      "item": [
+        {
+          "name": "6.1 Health check (GET /health)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api_url}}/health",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "6.2 Readiness con base (GET /health/ready)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "Verifica la conexion real a Aurora. /health no la toca.",
+            "url": {
+              "raw": "{{api_url}}/health/ready",
+              "host": [
+                "{{api_url}}"
+              ],
+              "path": [
+                "health",
+                "ready"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

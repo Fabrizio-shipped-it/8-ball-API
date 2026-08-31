@@ -45,13 +45,22 @@ public class MatchService
         if (dto.Player1Id == dto.Player2Id)
             return (null, "Un jugador no puede jugar contra sí mismo", MatchError.Validation);
 
+        var errorHorario = ValidarHorario(dto.StartTime, dto.EndTime, exigirFutura: true);
+        if (errorHorario != null)
+            return (null, errorHorario, MatchError.Validation);
+
         // Calcular EndTime estimado si no se provee (default: 1 hora)
         var endTime = dto.EndTime ?? dto.StartTime.AddHours(1);
 
-        // Verificar double-booking
+        // Verificar double-booking de jugadores
         var conflict = await HasConflict(dto.Player1Id, dto.Player2Id, dto.StartTime, endTime);
         if (conflict != null)
             return (null, conflict, MatchError.Conflict);
+
+        // Verificar double-booking de mesa
+        var conflictoMesa = await HasTableConflict(dto.TableNumber, dto.StartTime, endTime);
+        if (conflictoMesa != null)
+            return (null, conflictoMesa, MatchError.Conflict);
 
         var match = new Match
         {
@@ -83,9 +92,20 @@ public class MatchService
         if (!(isAdmin && includeAll))
             query = query.Where(m => m.Player1Id == callerPlayerId || m.Player2Id == callerPlayerId);
 
-        // Filtro por fecha
-        if (DateTime.TryParse(date, out var parsedDate))
-            query = query.Where(m => m.StartTime.Date == parsedDate.Date);
+        // Filtro por fecha, como rango.
+        //
+        // Antes era `m.StartTime.Date == parsedDate.Date`, que aplica una función
+        // sobre la columna y por lo tanto NO puede usar el índice IX_Matches_StartTime
+        // (que existe justamente para esto). Un rango sí lo aprovecha.
+        if (DateTime.TryParse(date, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AdjustToUniversal |
+                System.Globalization.DateTimeStyles.AssumeUniversal,
+                out var parsedDate))
+        {
+            var desde = DateTime.SpecifyKind(parsedDate.Date, DateTimeKind.Utc);
+            var hasta = desde.AddDays(1);
+            query = query.Where(m => m.StartTime >= desde && m.StartTime < hasta);
+        }
 
         var matches = await query.ToListAsync();
 
@@ -134,17 +154,40 @@ public class MatchService
         if (!isAdmin && match.Player1Id != callerPlayerId && match.Player2Id != callerPlayerId)
             return (null, "Match no encontrado", MatchError.NotFound);
 
-        // Si cambia StartTime, verificar double-booking de nuevo
-        if (dto.StartTime.HasValue)
+        // Se calcula cómo quedaría el match DESPUÉS de aplicar los cambios y se
+        // valida eso, en vez de validar campo por campo. Antes solo se revisaba
+        // cuando cambiaba StartTime: mover la partida de mesa, o acortar el
+        // EndTime, se colaba sin ninguna verificación.
+        var nuevoStart = dto.StartTime ?? match.StartTime;
+        var nuevoEnd = dto.EndTime ?? match.EndTime;
+        var nuevaMesa = dto.TableNumber ?? match.TableNumber;
+
+        var cambiaHorario = dto.StartTime.HasValue || dto.EndTime.HasValue;
+        var cambiaMesa = dto.TableNumber.HasValue;
+
+        if (cambiaHorario)
         {
-            var endTime = dto.EndTime ?? match.EndTime ?? dto.StartTime.Value.AddHours(1);
-            var conflict = await HasConflict(match.Player1Id, match.Player2Id, dto.StartTime.Value, endTime, id);
+            // Al reprogramar no se exige fecha futura: un admin puede estar
+            // corrigiendo los datos de una partida que ya se jugó.
+            var errorHorario = ValidarHorario(nuevoStart, nuevoEnd, exigirFutura: false);
+            if (errorHorario != null)
+                return (null, errorHorario, MatchError.Validation);
+        }
+
+        if (cambiaHorario || cambiaMesa)
+        {
+            var endEfectivo = nuevoEnd ?? nuevoStart.AddHours(1);
+
+            var conflict = await HasConflict(match.Player1Id, match.Player2Id, nuevoStart, endEfectivo, id);
             if (conflict != null)
                 return (null, conflict, MatchError.Conflict);
 
-            match.StartTime = dto.StartTime.Value;
+            var conflictoMesa = await HasTableConflict(nuevaMesa, nuevoStart, endEfectivo, id);
+            if (conflictoMesa != null)
+                return (null, conflictoMesa, MatchError.Conflict);
         }
 
+        match.StartTime = nuevoStart;
         if (dto.EndTime.HasValue) match.EndTime = dto.EndTime.Value;
         if (dto.TableNumber.HasValue) match.TableNumber = dto.TableNumber.Value;
 
@@ -208,7 +251,51 @@ public class MatchService
         match.WinnerId = newWinnerId;
     }
 
+    // --- Validación de horarios ---
+
+    /// Reglas que antes no existían: se podía crear una partida que terminaba
+    /// antes de empezar, o agendarla en 2019.
+    private static string? ValidarHorario(DateTime start, DateTime? end, bool exigirFutura)
+    {
+        if (end.HasValue && end.Value <= start)
+            return "La hora de fin debe ser posterior a la de inicio";
+
+        if (end.HasValue && (end.Value - start) > TimeSpan.FromHours(12))
+            return "Una partida no puede durar más de 12 horas";
+
+        if (exigirFutura && start < DateTime.UtcNow.AddMinutes(-5))
+            return "No se puede agendar una partida en el pasado";
+
+        return null;
+    }
+
     // --- Double-booking ---
+
+    /// Dos partidas no pueden compartir mesa en horarios que se solapan.
+    /// El chequeo anterior solo miraba jugadores, así que la mesa 5 podía tener
+    /// tres partidas simultáneas — en un club de pool eso es imposible.
+    private async Task<string?> HasTableConflict(
+        int? tableNumber, DateTime start, DateTime end, int? excludeMatchId = null)
+    {
+        // Sin mesa asignada no hay nada que reservar.
+        if (!tableNumber.HasValue) return null;
+
+        var query = _context.Matches.Where(m => m.TableNumber == tableNumber.Value);
+
+        if (excludeMatchId.HasValue)
+            query = query.Where(m => m.Id != excludeMatchId.Value);
+
+        var conflicting = await query
+            .Where(m =>
+                m.StartTime < end &&
+                (m.EndTime == null ? m.StartTime.AddHours(1) : m.EndTime.Value) > start)
+            .FirstOrDefaultAsync();
+
+        return conflicting == null
+            ? null
+            : $"La mesa {tableNumber.Value} ya está ocupada en ese horario (Match #{conflicting.Id})";
+    }
+
     /// HasConflict: si el match existente empieza antes de que el nuevo termine, Y el match existente termina después de que el nuevo empiece,
     ///  hay solapamiento. El parámetro excludeMatchId sirve para cuando actualizás un match ya que no queremos que se detecte conflicto consigo mismo.
     private async Task<string?> HasConflict(int player1Id, int player2Id, DateTime start, DateTime end, int? excludeMatchId = null)

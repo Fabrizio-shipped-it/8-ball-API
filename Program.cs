@@ -20,6 +20,18 @@ var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 var useIamAuth = builder.Configuration.GetValue<bool>("AWS:UseIamAuth");
 
+// Reintento ante fallas transitorias.
+// Aurora Serverless puede tardar en despertar y una conexión puede cortarse por
+// un failover. Sin esto, cualquiera de esas dos cosas se propaga como un 500 al
+// cliente aunque el segundo intento hubiera funcionado.
+static void ConfigurarReintentos(Npgsql.EntityFrameworkCore.PostgreSQL.Infrastructure.NpgsqlDbContextOptionsBuilder npgsql)
+{
+    npgsql.EnableRetryOnFailure(
+        maxRetryCount: 3,
+        maxRetryDelay: TimeSpan.FromSeconds(10),
+        errorCodesToAdd: null);
+}
+
 if (useIamAuth)
 {
     // En AWS: generar token IAM como contraseña (se renueva cada 14 min)
@@ -32,19 +44,14 @@ if (useIamAuth)
     var dataSource = dataSourceBuilder.Build();
 
     builder.Services.AddDbContext<AppDbContext>(options =>
-        options.UseNpgsql(dataSource));
+        options.UseNpgsql(dataSource, ConfigurarReintentos));
 }
 else
 {
     // En local: conexión normal con contraseña en la connection string
     builder.Services.AddDbContext<AppDbContext>(options =>
-        options.UseNpgsql(connectionString));
+        options.UseNpgsql(connectionString, ConfigurarReintentos));
 }
-
-
-    
-
-
 
 builder.Services.AddScoped<PlayerService>();
 builder.Services.AddScoped<MatchService>();
@@ -200,16 +207,38 @@ builder.Services.AddRateLimiter(options =>
         opt.QueueLimit = 0;
     });
 
-    options.AddFixedWindowLimiter("auth", opt =>
+    // Límite más estricto para las operaciones de S3.
+    //
+    // Antes existía una policy "auth" de 5 req/15 min que no se aplicaba a ningún
+    // endpoint: era código muerto que el readme anunciaba como feature. Se la
+    // reemplaza por un límite sobre /storage, que es el vector real de abuso:
+    // cada llamada firma una URL y habilita a escribir un objeto en el bucket.
+    options.AddFixedWindowLimiter("storage", opt =>
     {
-        opt.PermitLimit = 5;
-        opt.Window = TimeSpan.FromMinutes(15);
+        opt.PermitLimit = 20;
+        opt.Window = TimeSpan.FromMinutes(5);
         opt.QueueLimit = 0;
     });
+
+    // Sin esto el 429 sale con el body vacío y el cliente no sabe qué pasó.
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        context.HttpContext.Response.ContentType = "application/json";
+        await context.HttpContext.Response.WriteAsJsonAsync(
+            new { error = "Demasiadas solicitudes. Esperá un momento y volvé a intentar." },
+            cancellationToken);
+    };
 });
 
-// Healthcheck
-builder.Services.AddHealthChecks();
+// Health checks
+//   /health       → liveness, sin base. Es el que mira el ALB.
+//   /health/ready → readiness, con base. Ver Infrastructure/DatabaseHealthCheck.cs
+// Se registra explícitamente para que el AppDbContext (scoped) se le inyecte
+// por la vía normal de DI y no por activación implícita.
+builder.Services.AddScoped<DatabaseHealthCheck>();
+
+builder.Services.AddHealthChecks()
+    .AddCheck<DatabaseHealthCheck>("database", tags: ["ready"]);
 
 var app = builder.Build();
 
@@ -222,38 +251,86 @@ using (var scope = app.Services.CreateScope())
 }
 
 // --- Middleware ---
+// El orden importa. Cada middleware solo ve lo que ocurre "más abajo" en la
+// cadena, así que el manejo de errores tiene que ir primero para atrapar todo.
 
-app.UseSwagger();
-app.UseSwaggerUI();
-
-
-app.UseRateLimiter();
-
-
-/// Manejo global de excepciones
-/// Qué hace: si cualquier excepción no controlada ocurre, en vez de devolver el stack trace completo (que revela rutas, nombres de clases, etc.), 
-/// devuelve un JSON genérico {"error": "Error interno del servidor"} y loguea el error real internamente.
+// 1) Excepciones no controladas.
+//    Antes estaba después del rate limiter, así que una excepción ahí arriba
+//    escapaba sin formato. Ahora envuelve toda la aplicación.
 app.UseExceptionHandler(errorApp =>
 {
     errorApp.Run(async context =>
     {
         var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
-        var exception = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
+        var exception = context.Features
+            .Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
 
-        logger.LogError(exception, "Error no controlado");
+        // El TraceId es el mismo que aparece en CloudWatch. Es lo único que se
+        // expone del error: permite correlacionar el reporte de un usuario con
+        // el stack trace real sin filtrarle nada de la implementación.
+        var traceId = System.Diagnostics.Activity.Current?.Id ?? context.TraceIdentifier;
+
+        logger.LogError(exception, "Error no controlado. TraceId={TraceId}", traceId);
 
         context.Response.StatusCode = StatusCodes.Status500InternalServerError;
         context.Response.ContentType = "application/json";
-        await context.Response.WriteAsJsonAsync(new { error = "Error interno del servidor" });
+        await context.Response.WriteAsJsonAsync(new
+        {
+            error = "Error interno del servidor",
+            traceId
+        });
     });
 });
 
+// 2) Respuestas de error SIN cuerpo.
+//    404 de ruta inexistente, 401 sin token, 403 sin rol, 405 de método
+//    equivocado: el framework las emite vacías. Un cliente recibía un status
+//    pelado y ninguna pista. Acá se les pone el mismo formato { "error": ... }
+//    que usa el resto de la API.
+app.UseStatusCodePages(async statusCodeContext =>
+{
+    var response = statusCodeContext.HttpContext.Response;
+
+    // Si algo ya escribió un cuerpo (un controller devolviendo NotFound(new {error}))
+    // no se pisa.
+    if (response.HasStarted) return;
+
+    var mensaje = response.StatusCode switch
+    {
+        StatusCodes.Status400BadRequest => "Request inválido",
+        StatusCodes.Status401Unauthorized => "Token ausente, inválido o vencido",
+        StatusCodes.Status403Forbidden => "No tenés permisos para esta operación",
+        StatusCodes.Status404NotFound => "El recurso solicitado no existe",
+        StatusCodes.Status405MethodNotAllowed => "Método HTTP no permitido para esta ruta",
+        StatusCodes.Status415UnsupportedMediaType => "Content-Type no soportado",
+        StatusCodes.Status429TooManyRequests => "Demasiadas solicitudes",
+        _ => "La solicitud no pudo completarse"
+    };
+
+    response.ContentType = "application/json";
+    await response.WriteAsJsonAsync(new { error = mensaje });
+});
+
+app.UseSwagger();
+app.UseSwaggerUI();
+
+app.UseRateLimiter();
 
 app.UseAuthentication();  // Primero valida el token
 app.UseAuthorization();   // Después verifica permisos/roles
 
 app.MapControllers();
 
-app.MapHealthChecks("/health").AllowAnonymous();
+// Liveness: no toca la base. Es el health check del balanceador.
+app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    Predicate = _ => false
+}).AllowAnonymous();
+
+// Readiness: incluye la base. Para diagnóstico y monitoreo, no para el ALB.
+app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("ready")
+}).AllowAnonymous();
 
 app.Run();

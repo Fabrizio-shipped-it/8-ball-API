@@ -267,6 +267,147 @@ public class MatchServiceTests
     }
 
     [Fact]
+    public async Task Create_RejectsEndTimeBeforeStartTime()
+    {
+        var s = await SetupWithPlayers();
+        var start = DateTime.UtcNow.AddHours(2);
+
+        var (match, error, kind) = await s.Service.Create(new CreateMatchDto
+        {
+            Player1Id = s.P1,
+            Player2Id = s.P2,
+            StartTime = start,
+            EndTime = start.AddHours(-1)   // termina antes de empezar
+        }, s.P1, isAdmin: false);
+
+        Assert.Equal(MatchError.Validation, kind);
+        Assert.Contains("posterior", error);
+        Assert.Null(match);
+    }
+
+    [Fact]
+    public async Task Create_RejectsMatchInThePast()
+    {
+        var s = await SetupWithPlayers();
+
+        var (match, error, kind) = await s.Service.Create(new CreateMatchDto
+        {
+            Player1Id = s.P1,
+            Player2Id = s.P2,
+            StartTime = DateTime.UtcNow.AddDays(-3)
+        }, s.P1, isAdmin: false);
+
+        Assert.Equal(MatchError.Validation, kind);
+        Assert.Contains("pasado", error);
+        Assert.Null(match);
+    }
+
+    [Fact]
+    public async Task Create_RejectsSameTableAtOverlappingTime()
+    {
+        // El double-booking anterior solo miraba jugadores: la mesa 5 podía
+        // tener varias partidas simultáneas.
+        var s = await SetupWithPlayers();
+        var start = DateTime.UtcNow.AddHours(2);
+
+        await s.Service.Create(new CreateMatchDto
+        {
+            Player1Id = s.P1,
+            Player2Id = s.P2,
+            StartTime = start,
+            EndTime = start.AddHours(1),
+            TableNumber = 5
+        }, s.P1, isAdmin: false);
+
+        // Otros dos jugadores, misma mesa, horario solapado.
+        var otro = await new PlayerService(s.Context, NullLoggerFactory.Instance.CreateLogger<PlayerService>())
+            .Create(new CreatePlayerDto { Name = "Cuarto" }, Guid.NewGuid().ToString());
+
+        var (match, error, kind) = await s.Service.Create(new CreateMatchDto
+        {
+            Player1Id = s.Outsider,
+            Player2Id = otro.Id,
+            StartTime = start.AddMinutes(30),
+            EndTime = start.AddHours(1).AddMinutes(30),
+            TableNumber = 5
+        }, s.Outsider, isAdmin: false);
+
+        Assert.Equal(MatchError.Conflict, kind);
+        Assert.Contains("mesa 5", error);
+        Assert.Null(match);
+    }
+
+    [Fact]
+    public async Task Create_AllowsSameTableAtDifferentTime()
+    {
+        var s = await SetupWithPlayers();
+        var start = DateTime.UtcNow.AddHours(2);
+
+        await s.Service.Create(new CreateMatchDto
+        {
+            Player1Id = s.P1,
+            Player2Id = s.P2,
+            StartTime = start,
+            EndTime = start.AddHours(1),
+            TableNumber = 7
+        }, s.P1, isAdmin: false);
+
+        var otro = await new PlayerService(s.Context, NullLoggerFactory.Instance.CreateLogger<PlayerService>())
+            .Create(new CreatePlayerDto { Name = "Quinto" }, Guid.NewGuid().ToString());
+
+        var (match, error, kind) = await s.Service.Create(new CreateMatchDto
+        {
+            Player1Id = s.Outsider,
+            Player2Id = otro.Id,
+            StartTime = start.AddHours(2),
+            EndTime = start.AddHours(3),
+            TableNumber = 7
+        }, s.Outsider, isAdmin: false);
+
+        Assert.Equal(MatchError.None, kind);
+        Assert.Null(error);
+        Assert.NotNull(match);
+    }
+
+    [Fact]
+    public async Task Update_ChangingOnlyTableStillChecksTableConflict()
+    {
+        // Antes el chequeo solo corría si cambiaba StartTime, así que mover una
+        // partida a una mesa ya ocupada pasaba sin validar.
+        var s = await SetupWithPlayers();
+        var start = DateTime.UtcNow.AddHours(2);
+
+        await s.Service.Create(new CreateMatchDto
+        {
+            Player1Id = s.P1,
+            Player2Id = s.P2,
+            StartTime = start,
+            EndTime = start.AddHours(1),
+            TableNumber = 3
+        }, s.P1, isAdmin: false);
+
+        var otro = await new PlayerService(s.Context, NullLoggerFactory.Instance.CreateLogger<PlayerService>())
+            .Create(new CreatePlayerDto { Name = "Sexto" }, Guid.NewGuid().ToString());
+
+        var (segunda, _, _) = await s.Service.Create(new CreateMatchDto
+        {
+            Player1Id = s.Outsider,
+            Player2Id = otro.Id,
+            StartTime = start,
+            EndTime = start.AddHours(1),
+            TableNumber = 4
+        }, s.Outsider, isAdmin: false);
+
+        // Mover la segunda a la mesa 3, que está ocupada en ese mismo horario.
+        var (match, error, kind) = await s.Service.Update(
+            segunda!.Id, new UpdateMatchDto { TableNumber = 3 }, s.Outsider, isAdmin: false);
+
+        Assert.Equal(MatchError.Conflict, kind);
+        Assert.Contains("mesa 3", error);
+        Assert.Null(match);
+    }
+
+    [Fact]
     public async Task Create_AllowsNonOverlappingMatches()
     {
         var s = await SetupWithPlayers();

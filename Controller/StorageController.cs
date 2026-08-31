@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using PoolManager.DTOs;
 using PoolManager.Infrastructure;
 using PoolManager.Services;
 
@@ -9,7 +10,11 @@ namespace PoolManager.Controllers;
 [ApiController]
 [Route("[controller]")]
 [Authorize]
-[EnableRateLimiting("general")]
+// Límite más estricto que el resto de la API: cada llamada acá firma una URL
+// que habilita a escribir en el bucket.
+[EnableRateLimiting("storage")]
+[ProducesResponseType(typeof(ErrorDto), StatusCodes.Status401Unauthorized)]
+[ProducesResponseType(typeof(ErrorDto), StatusCodes.Status429TooManyRequests)]
 public class StorageController : ApiControllerBase
 {
     private static readonly string[] AllowedContentTypes =
@@ -24,17 +29,22 @@ public class StorageController : ApiControllerBase
         _playerService = playerService;
     }
 
-    // GET /storage/upload-url?fileName=foto.jpg&contentType=image/jpeg
+    /// <summary>
+    /// Devuelve una URL pre-firmada para subir una imagen a tu carpeta.
+    /// Válida 5 minutos.
+    /// </summary>
     [HttpGet("upload-url")]
+    [ProducesResponseType(typeof(UploadUrlDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorDto), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> GetUploadUrl(
         [FromQuery] string fileName,
         [FromQuery] string contentType = "image/jpeg")
     {
         if (string.IsNullOrWhiteSpace(fileName))
-            return BadRequest(new { error = "fileName es requerido" });
+            return BadRequest(new ErrorDto("fileName es requerido"));
 
         if (!AllowedContentTypes.Contains(contentType))
-            return BadRequest(new { error = "Tipo de imagen no permitido. Usá jpeg, png o webp" });
+            return BadRequest(new ErrorDto("Tipo de imagen no permitido. Usá jpeg, png o webp"));
 
         var playerId = await GetCallerPlayerId(_playerService);
         if (playerId == null) return NotRegistered();
@@ -44,15 +54,21 @@ public class StorageController : ApiControllerBase
         // así que el bucket quedaba lleno de directorios huérfanos.
         var (url, key, ct) = _s3Service.GetUploadUrl(playerId.Value, fileName, contentType);
 
-        return Ok(new { uploadUrl = url, key, contentType = ct, expiresInSeconds = 300 });
+        return Ok(new UploadUrlDto(url, key, ct, 300));
     }
 
-    // GET /storage/download-url?key=players/12/9f3a-foto.jpg
+    /// <summary>
+    /// Devuelve una URL pre-firmada para ver una imagen. Solo funciona con keys
+    /// propias o con la foto de perfil publicada de algún jugador.
+    /// </summary>
     [HttpGet("download-url")]
+    [ProducesResponseType(typeof(DownloadUrlDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorDto), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ErrorDto), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetDownloadUrl([FromQuery] string key)
     {
         if (string.IsNullOrWhiteSpace(key))
-            return BadRequest(new { error = "key es requerido" });
+            return BadRequest(new ErrorDto("key es requerido"));
 
         var playerId = await GetCallerPlayerId(_playerService);
         if (playerId == null) return NotRegistered();
@@ -68,11 +84,11 @@ public class StorageController : ApiControllerBase
         var isPublished = !isOwn && await _playerService.IsPublishedProfileKey(key);
 
         if (!isOwn && !isPublished)
-            return NotFound(new { error = "Imagen no encontrada" });
+            return NotFound(new ErrorDto("Imagen no encontrada"));
 
         if (isOwn && !await _s3Service.ObjectExists(key))
-            return NotFound(new { error = "Imagen no encontrada" });
+            return NotFound(new ErrorDto("Imagen no encontrada"));
 
-        return Ok(new { downloadUrl = _s3Service.GetDownloadUrl(key), expiresInSeconds = 3600 });
+        return Ok(new DownloadUrlDto(_s3Service.GetDownloadUrl(key), 3600));
     }
 }

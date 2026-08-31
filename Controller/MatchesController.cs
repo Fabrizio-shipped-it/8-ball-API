@@ -11,6 +11,8 @@ namespace PoolManager.Controllers;
 [Route("[controller]")]
 [Authorize]
 [EnableRateLimiting("general")]
+[ProducesResponseType(typeof(ErrorDto), StatusCodes.Status401Unauthorized)]
+[ProducesResponseType(typeof(ErrorDto), StatusCodes.Status429TooManyRequests)]
 public class MatchesController : ApiControllerBase
 {
     private readonly MatchService _matchService;
@@ -22,8 +24,15 @@ public class MatchesController : ApiControllerBase
         _playerService = playerService;
     }
 
-    // POST /matches
+    /// <summary>
+    /// Crea una partida. Solo podés crear partidas en las que participás,
+    /// salvo que seas admin.
+    /// </summary>
     [HttpPost]
+    [ProducesResponseType(typeof(MatchResponseDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ErrorDto), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ErrorDto), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ErrorDto), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Create([FromBody] CreateMatchDto dto)
     {
         var callerId = await GetCallerPlayerId(_playerService);
@@ -35,9 +44,15 @@ public class MatchesController : ApiControllerBase
         return CreatedAtAction(nameof(GetById), new { id = match!.Id }, match);
     }
 
-    // GET /matches
-    // Por defecto devuelve solo TUS partidas. ?all=true es exclusivo de admin.
+    /// <summary>
+    /// Lista tus partidas. Filtros opcionales por fecha (YYYY-MM-DD) y estado
+    /// (upcoming / ongoing / completed). El parámetro all=true, que devuelve
+    /// las de todos los jugadores, está reservado a admin.
+    /// </summary>
     [HttpGet]
+    [ProducesResponseType(typeof(List<MatchResponseDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorDto), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ErrorDto), StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetAll(
         [FromQuery] string? date,
         [FromQuery] string? status,
@@ -48,27 +63,38 @@ public class MatchesController : ApiControllerBase
 
         if (all && !IsAdmin)
             return StatusCode(StatusCodes.Status403Forbidden,
-                new { error = "Solo un admin puede listar todas las partidas" });
+                new ErrorDto("Solo un admin puede listar todas las partidas"));
 
         var matches = await _matchService.GetAll(date, status, callerId.Value, IsAdmin, all);
         return Ok(matches);
     }
 
-    // GET /matches/:id
+    /// <summary>
+    /// Detalle de una partida. Si no participás, devuelve 404 en vez de 403:
+    /// un 403 confirmaría que la partida existe.
+    /// </summary>
     [HttpGet("{id}")]
+    [ProducesResponseType(typeof(MatchResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorDto), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(int id)
     {
         var callerId = await GetCallerPlayerId(_playerService);
         if (callerId == null) return NotRegistered();
 
         var (match, kind) = await _matchService.GetById(id, callerId.Value, IsAdmin);
-        if (kind != MatchError.None) return NotFound(new { error = "Match no encontrado" });
+        if (kind != MatchError.None) return NotFound(new ErrorDto("Match no encontrado"));
 
         return Ok(match);
     }
 
-    // PATCH /matches/:id
+    /// <summary>
+    /// Actualiza una partida o declara el ganador. Solo participantes o admin.
+    /// </summary>
     [HttpPatch("{id}")]
+    [ProducesResponseType(typeof(MatchResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorDto), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ErrorDto), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorDto), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateMatchDto dto)
     {
         var callerId = await GetCallerPlayerId(_playerService);
@@ -80,9 +106,13 @@ public class MatchesController : ApiControllerBase
         return Ok(match);
     }
 
-    // DELETE /matches/:id
+    /// <summary>Elimina una partida. Solo admin, y solo si no está en curso.</summary>
     [HttpDelete("{id}")]
     [Authorize(Roles = "admin")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ErrorDto), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ErrorDto), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorDto), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Delete(int id)
     {
         var (_, error, kind) = await _matchService.Delete(id);
@@ -95,7 +125,7 @@ public class MatchesController : ApiControllerBase
     /// leyendo el texto del mensaje como se hacía antes.
     private IActionResult MapError(MatchError kind, string? error)
     {
-        var payload = new { error = error ?? "Request inválido" };
+        var payload = new ErrorDto(error ?? "Request inválido");
 
         return kind switch
         {

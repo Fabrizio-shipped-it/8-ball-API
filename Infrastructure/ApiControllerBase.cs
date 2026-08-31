@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
+using PoolManager.DTOs;
 using PoolManager.Services;
 
 namespace PoolManager.Infrastructure;
@@ -31,5 +32,5 @@ public abstract class ApiControllerBase : ControllerBase
 
     /// Respuesta estándar para el caso "tenés token válido pero no sos un jugador todavía".
     protected IActionResult NotRegistered() =>
-        BadRequest(new { error = "Todavía no estás registrado como jugador. Llamá primero a GET /players/me" });
+        BadRequest(new ErrorDto("Todavía no estás registrado como jugador. Llamá primero a GET /players/me"));
 }
