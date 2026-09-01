@@ -1,5 +1,7 @@
 # 8-Ball Pool Manager API
 
+# El actual proyecto ya no está disponible en la nube. Solo para despliegue local.
+
 API REST para gestionar jugadores y partidas de pool (billar), desarrollada con .NET 10.
 
 **Arquitectura en capas:** controllers → servicios de negocio → repositorio de datos. El acceso a la base está aislado detrás de `IRepositorioDatos`, así que cambiar de motor se resuelve escribiendo otra implementación sin tocar la lógica de negocio.
