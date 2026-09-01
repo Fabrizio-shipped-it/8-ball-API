@@ -1,4 +1,3 @@
-using Microsoft.EntityFrameworkCore;
 using PoolManager.Data;
 using PoolManager.DTOs;
 using PoolManager.Models;
@@ -16,14 +15,18 @@ public enum MatchError
     Forbidden
 }
 
+/// <summary>
+/// Reglas de negocio de las partidas. No conoce el motor de base de datos:
+/// todo el acceso pasa por IRepositorioDatos.
+/// </summary>
 public class MatchService
 {
-    private readonly AppDbContext _context;
+    private readonly IRepositorioDatos _datos;
     private readonly ILogger<MatchService> _logger;
 
-    public MatchService(AppDbContext context, ILogger<MatchService> logger)
+    public MatchService(IRepositorioDatos datos, ILogger<MatchService> logger)
     {
-        _context = context;
+        _datos = datos;
         _logger = logger;
     }
 
@@ -36,8 +39,8 @@ public class MatchService
         if (!isAdmin && dto.Player1Id != callerPlayerId && dto.Player2Id != callerPlayerId)
             return (null, "Solo podés crear partidas en las que participás", MatchError.Forbidden);
 
-        var player1 = await _context.Players.FindAsync(dto.Player1Id);
-        var player2 = await _context.Players.FindAsync(dto.Player2Id);
+        var player1 = await _datos.ObtenerJugadorPorId(dto.Player1Id);
+        var player2 = await _datos.ObtenerJugadorPorId(dto.Player2Id);
 
         if (player1 == null || player2 == null)
             return (null, "Uno o ambos jugadores no existen", MatchError.Validation);
@@ -71,8 +74,8 @@ public class MatchService
             TableNumber = dto.TableNumber
         };
 
-        _context.Matches.Add(match);
-        await _context.SaveChangesAsync();
+        _datos.AgregarPartida(match);
+        await _datos.GuardarCambios();
         _logger.LogInformation("Match creado: #{MatchId} - Jugador {P1} vs {P2}", match.Id, match.Player1Id, match.Player2Id);
 
         return (await MapToDto(match), null, MatchError.None);
@@ -83,31 +86,23 @@ public class MatchService
     public async Task<List<MatchResponseDto>> GetAll(
         string? date, string? status, int callerPlayerId, bool isAdmin, bool includeAll)
     {
-        var query = _context.Matches
-            .Include(m => m.Player1)
-            .Include(m => m.Player2)
-            .Include(m => m.Winner)
-            .AsQueryable();
+        // La interpretación del texto de la fecha es una decisión de negocio;
+        // el repositorio solo recibe un rango ya resuelto.
+        DateTime? desde = null;
+        DateTime? hasta = null;
 
-        if (!(isAdmin && includeAll))
-            query = query.Where(m => m.Player1Id == callerPlayerId || m.Player2Id == callerPlayerId);
-
-        // Filtro por fecha, como rango.
-        //
-        // Antes era `m.StartTime.Date == parsedDate.Date`, que aplica una función
-        // sobre la columna y por lo tanto NO puede usar el índice IX_Matches_StartTime
-        // (que existe justamente para esto). Un rango sí lo aprovecha.
         if (DateTime.TryParse(date, System.Globalization.CultureInfo.InvariantCulture,
                 System.Globalization.DateTimeStyles.AdjustToUniversal |
                 System.Globalization.DateTimeStyles.AssumeUniversal,
                 out var parsedDate))
         {
-            var desde = DateTime.SpecifyKind(parsedDate.Date, DateTimeKind.Utc);
-            var hasta = desde.AddDays(1);
-            query = query.Where(m => m.StartTime >= desde && m.StartTime < hasta);
+            desde = DateTime.SpecifyKind(parsedDate.Date, DateTimeKind.Utc);
+            hasta = desde.Value.AddDays(1);
         }
 
-        var matches = await query.ToListAsync();
+        int? soloDelJugador = (isAdmin && includeAll) ? null : callerPlayerId;
+
+        var matches = await _datos.ListarPartidas(soloDelJugador, desde, hasta);
 
         // Filtro por status (se aplica en memoria porque es calculado)
         if (!string.IsNullOrWhiteSpace(status))
@@ -120,11 +115,7 @@ public class MatchService
 
     public async Task<(MatchResponseDto? Match, MatchError Kind)> GetById(int id, int callerPlayerId, bool isAdmin)
     {
-        var match = await _context.Matches
-            .Include(m => m.Player1)
-            .Include(m => m.Player2)
-            .Include(m => m.Winner)
-            .FirstOrDefaultAsync(m => m.Id == id);
+        var match = await _datos.ObtenerPartidaCompleta(id);
 
         if (match == null)
             return (null, MatchError.NotFound);
@@ -140,10 +131,7 @@ public class MatchService
     public async Task<(MatchResponseDto? Match, string? Error, MatchError Kind)> Update(
         int id, UpdateMatchDto dto, int callerPlayerId, bool isAdmin)
     {
-        var match = await _context.Matches
-            .Include(m => m.Player1)
-            .Include(m => m.Player2)
-            .FirstOrDefaultAsync(m => m.Id == id);
+        var match = await _datos.ObtenerPartidaCompleta(id);
 
         if (match == null)
             return (null, "Match no encontrado", MatchError.NotFound);
@@ -200,13 +188,15 @@ public class MatchService
             await ReassignWinner(match, dto.WinnerId.Value);
         }
 
-        await _context.SaveChangesAsync();
+        // Un solo guardado para todos los cambios: la partida y los contadores de
+        // victorias caen juntos o no caen.
+        await _datos.GuardarCambios();
         return (await MapToDto(match), null, MatchError.None);
     }
 
     public async Task<(bool Success, string? Error, MatchError Kind)> Delete(int id)
     {
-        var match = await _context.Matches.FindAsync(id);
+        var match = await _datos.ObtenerPartidaPorId(id);
         if (match == null)
             return (false, "Match no encontrado", MatchError.NotFound);
 
@@ -217,12 +207,12 @@ public class MatchService
         // Si tenía ganador, hay que devolverle la victoria antes de borrar.
         if (match.WinnerId.HasValue)
         {
-            var previous = await _context.Players.FindAsync(match.WinnerId.Value);
+            var previous = await _datos.ObtenerJugadorPorId(match.WinnerId.Value);
             if (previous != null && previous.Wins > 0) previous.Wins -= 1;
         }
 
-        _context.Matches.Remove(match);
-        await _context.SaveChangesAsync();
+        _datos.EliminarPartida(match);
+        await _datos.GuardarCambios();
         return (true, null, MatchError.None);
     }
 
@@ -236,7 +226,7 @@ public class MatchService
 
         if (match.WinnerId.HasValue)
         {
-            var previous = await _context.Players.FindAsync(match.WinnerId.Value);
+            var previous = await _datos.ObtenerJugadorPorId(match.WinnerId.Value);
             if (previous != null && previous.Wins > 0)
             {
                 previous.Wins -= 1;
@@ -245,7 +235,7 @@ public class MatchService
             }
         }
 
-        var winner = await _context.Players.FindAsync(newWinnerId);
+        var winner = await _datos.ObtenerJugadorPorId(newWinnerId);
         if (winner != null) winner.Wins += 1;
 
         match.WinnerId = newWinnerId;
@@ -280,40 +270,22 @@ public class MatchService
         // Sin mesa asignada no hay nada que reservar.
         if (!tableNumber.HasValue) return null;
 
-        var query = _context.Matches.Where(m => m.TableNumber == tableNumber.Value);
-
-        if (excludeMatchId.HasValue)
-            query = query.Where(m => m.Id != excludeMatchId.Value);
-
-        var conflicting = await query
-            .Where(m =>
-                m.StartTime < end &&
-                (m.EndTime == null ? m.StartTime.AddHours(1) : m.EndTime.Value) > start)
-            .FirstOrDefaultAsync();
+        var conflicting = await _datos.BuscarPartidaSolapadaEnMesa(
+            tableNumber.Value, start, end, excludeMatchId);
 
         return conflicting == null
             ? null
             : $"La mesa {tableNumber.Value} ya está ocupada en ese horario (Match #{conflicting.Id})";
     }
 
-    /// HasConflict: si el match existente empieza antes de que el nuevo termine, Y el match existente termina después de que el nuevo empiece,
-    ///  hay solapamiento. El parámetro excludeMatchId sirve para cuando actualizás un match ya que no queremos que se detecte conflicto consigo mismo.
-    private async Task<string?> HasConflict(int player1Id, int player2Id, DateTime start, DateTime end, int? excludeMatchId = null)
+    /// Ninguno de los dos jugadores puede tener otra partida que se solape.
+    /// El parámetro excludeMatchId evita que un match entre en conflicto consigo mismo
+    /// cuando se lo está actualizando.
+    private async Task<string?> HasConflict(
+        int player1Id, int player2Id, DateTime start, DateTime end, int? excludeMatchId = null)
     {
-        var query = _context.Matches.AsQueryable();
-
-        if (excludeMatchId.HasValue)
-            query = query.Where(m => m.Id != excludeMatchId.Value);
-
-        var conflicting = await query
-            .Where(m =>
-                (m.Player1Id == player1Id || m.Player2Id == player1Id ||
-                 m.Player1Id == player2Id || m.Player2Id == player2Id)
-                &&
-                m.StartTime < end &&
-                (m.EndTime == null ? m.StartTime.AddHours(1) : m.EndTime.Value) > start
-            )
-            .FirstOrDefaultAsync();
+        var conflicting = await _datos.BuscarPartidaSolapadaDeJugadores(
+            player1Id, player2Id, start, end, excludeMatchId);
 
         if (conflicting == null) return null;
 
@@ -333,7 +305,7 @@ public class MatchService
         return "upcoming";
     }
 
-    // Cuando el match ya tiene Include cargado
+    // Cuando el match ya tiene los jugadores cargados
     private static MatchResponseDto MapToDtoFromLoaded(Match match)
     {
         return new MatchResponseDto
@@ -352,15 +324,10 @@ public class MatchService
         };
     }
 
-    // Cuando necesitamos cargar los jugadores
+    // Cuando hace falta recargar los jugadores tras un cambio
     private async Task<MatchResponseDto> MapToDto(Match match)
     {
-        var loaded = await _context.Matches
-            .Include(m => m.Player1)
-            .Include(m => m.Player2)
-            .Include(m => m.Winner)
-            .FirstAsync(m => m.Id == match.Id);
-
-        return MapToDtoFromLoaded(loaded);
+        var loaded = await _datos.ObtenerPartidaCompleta(match.Id);
+        return MapToDtoFromLoaded(loaded!);
     }
 }

@@ -15,4 +15,12 @@ public static class TestDbContext
         context.Database.EnsureCreated();
         return context;
     }
+
+    /// Repositorio real sobre la base en memoria.
+    ///
+    /// Los servicios ya no reciben un AppDbContext sino un IRepositorioDatos, así
+    /// que los tests arman el repositorio sobre el contexto de prueba. Sigue siendo
+    /// la implementación de verdad —no un doble— para que las consultas se ejerciten.
+    public static IRepositorioDatos Repositorio(AppDbContext context) =>
+        new RepositorioEfCore(context);
 }

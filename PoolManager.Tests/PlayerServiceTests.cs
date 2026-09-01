@@ -15,7 +15,8 @@ public class PlayerServiceTests
     private static PlayerService NewService(out PoolManager.Data.AppDbContext context)
     {
         context = TestDbContext.Create();
-        return new PlayerService(context, NullLoggerFactory.Instance.CreateLogger<PlayerService>());
+        return new PlayerService(TestDbContext.Repositorio(context),
+                                 NullLoggerFactory.Instance.CreateLogger<PlayerService>());
     }
 
     [Fact]

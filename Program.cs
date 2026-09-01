@@ -53,6 +53,11 @@ else
         options.UseNpgsql(connectionString, ConfigurarReintentos));
 }
 
+// Módulo de acceso a datos. Es lo único que conoce EF Core; los servicios de
+// negocio dependen de la interfaz. Cambiar de motor se resuelve registrando
+// otra implementación acá, sin tocar PlayerService ni MatchService.
+builder.Services.AddScoped<IRepositorioDatos, RepositorioEfCore>();
+
 builder.Services.AddScoped<PlayerService>();
 builder.Services.AddScoped<MatchService>();
 builder.Services.AddSingleton<S3Service>();

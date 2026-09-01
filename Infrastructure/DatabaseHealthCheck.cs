@@ -1,4 +1,3 @@
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using PoolManager.Data;
 
@@ -14,14 +13,17 @@ namespace PoolManager.Infrastructure;
 ///
 /// "/health"       → liveness  : ¿el proceso está vivo? Lo usa el ALB.
 /// "/health/ready" → readiness : ¿puede atender? Lo usás vos y el monitoreo.
+///
+/// La consulta en sí la hace el repositorio: este archivo tampoco sabe qué
+/// motor de base de datos hay abajo.
 /// </summary>
 public class DatabaseHealthCheck : IHealthCheck
 {
-    private readonly AppDbContext _context;
+    private readonly IRepositorioDatos _datos;
 
-    public DatabaseHealthCheck(AppDbContext context)
+    public DatabaseHealthCheck(IRepositorioDatos datos)
     {
-        _context = context;
+        _datos = datos;
     }
 
     public async Task<HealthCheckResult> CheckHealthAsync(
@@ -30,10 +32,7 @@ public class DatabaseHealthCheck : IHealthCheck
     {
         try
         {
-            // CanConnectAsync abre una conexión real y la cierra. Es más barato
-            // que una query, pero suficiente para detectar credenciales vencidas,
-            // el gateway caído o el cluster pausado.
-            var puedeConectar = await _context.Database.CanConnectAsync(cancellationToken);
+            var puedeConectar = await _datos.PuedeConectar(cancellationToken);
 
             return puedeConectar
                 ? HealthCheckResult.Healthy("Base accesible")

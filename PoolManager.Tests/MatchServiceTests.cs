@@ -19,8 +19,9 @@ public class MatchServiceTests
     private async Task<Setup> SetupWithPlayers()
     {
         var context = TestDbContext.Create();
-        var playerService = new PlayerService(context, NullLoggerFactory.Instance.CreateLogger<PlayerService>());
-        var matchService = new MatchService(context, NullLoggerFactory.Instance.CreateLogger<MatchService>());
+        var datos = TestDbContext.Repositorio(context);
+        var playerService = new PlayerService(datos, NullLoggerFactory.Instance.CreateLogger<PlayerService>());
+        var matchService = new MatchService(datos, NullLoggerFactory.Instance.CreateLogger<MatchService>());
 
         var p1 = await playerService.Create(new CreatePlayerDto { Name = _faker.Name.FullName() }, Guid.NewGuid().ToString());
         var p2 = await playerService.Create(new CreatePlayerDto { Name = _faker.Name.FullName() }, Guid.NewGuid().ToString());
@@ -320,7 +321,7 @@ public class MatchServiceTests
         }, s.P1, isAdmin: false);
 
         // Otros dos jugadores, misma mesa, horario solapado.
-        var otro = await new PlayerService(s.Context, NullLoggerFactory.Instance.CreateLogger<PlayerService>())
+        var otro = await new PlayerService(TestDbContext.Repositorio(s.Context), NullLoggerFactory.Instance.CreateLogger<PlayerService>())
             .Create(new CreatePlayerDto { Name = "Cuarto" }, Guid.NewGuid().ToString());
 
         var (match, error, kind) = await s.Service.Create(new CreateMatchDto
@@ -352,7 +353,7 @@ public class MatchServiceTests
             TableNumber = 7
         }, s.P1, isAdmin: false);
 
-        var otro = await new PlayerService(s.Context, NullLoggerFactory.Instance.CreateLogger<PlayerService>())
+        var otro = await new PlayerService(TestDbContext.Repositorio(s.Context), NullLoggerFactory.Instance.CreateLogger<PlayerService>())
             .Create(new CreatePlayerDto { Name = "Quinto" }, Guid.NewGuid().ToString());
 
         var (match, error, kind) = await s.Service.Create(new CreateMatchDto
@@ -386,7 +387,7 @@ public class MatchServiceTests
             TableNumber = 3
         }, s.P1, isAdmin: false);
 
-        var otro = await new PlayerService(s.Context, NullLoggerFactory.Instance.CreateLogger<PlayerService>())
+        var otro = await new PlayerService(TestDbContext.Repositorio(s.Context), NullLoggerFactory.Instance.CreateLogger<PlayerService>())
             .Create(new CreatePlayerDto { Name = "Sexto" }, Guid.NewGuid().ToString());
 
         var (segunda, _, _) = await s.Service.Create(new CreateMatchDto
