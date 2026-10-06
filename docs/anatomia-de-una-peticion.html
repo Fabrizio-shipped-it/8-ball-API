@@ -1,0 +1,576 @@
+<title>Anatomía de una Petición</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+  :root {
+    --ground:      #F2F4F1;
+    --surface:     #FBFCFA;
+    --surface-alt: #E9EDE8;
+    --line:        #D2DAD1;
+    --line-soft:   #E2E8E0;
+
+    --ink:         #16211C;
+    --ink-soft:    #4A5852;
+    --ink-faint:   #74827B;
+
+    --accent:      #0F5D4A;
+    --accent-soft: #DCEBE4;
+    --chalk:       #2C5C8F;
+
+    --warn:        #9A6410;
+    --warn-soft:   #F6ECD8;
+
+    --radius: 4px;
+    --measure: 68ch;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0E1512;
+      --surface:     #16201C;
+      --surface-alt: #1D2925;
+      --line:        #2B3833;
+      --line-soft:   #232F2A;
+      --ink:         #E6EDE8;
+      --ink-soft:    #A7B5AE;
+      --ink-faint:   #7C8B84;
+      --accent:      #56B394;
+      --accent-soft: #16332A;
+      --chalk:       #7FAEDC;
+      --warn:        #D6A44A;
+      --warn-soft:   #33280F;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:      #0E1512;
+    --surface:     #16201C;
+    --surface-alt: #1D2925;
+    --line:        #2B3833;
+    --line-soft:   #232F2A;
+    --ink:         #E6EDE8;
+    --ink-soft:    #A7B5AE;
+    --ink-faint:   #7C8B84;
+    --accent:      #56B394;
+    --accent-soft: #16332A;
+    --chalk:       #7FAEDC;
+    --warn:        #D6A44A;
+    --warn-soft:   #33280F;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, serif;
+    font-size: 17px;
+    line-height: 1.62;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px 96px; }
+
+  .head { padding: 72px 0 40px; border-bottom: 2px solid var(--ink); }
+  .eyebrow {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 18px;
+  }
+  h1 {
+    font-family: "Archivo", Arial, sans-serif; font-weight: 700;
+    font-size: clamp(2.3rem, 6vw, 3.8rem); line-height: 1.02;
+    letter-spacing: -.025em; margin: 0 0 20px; text-wrap: balance;
+  }
+  .lede { font-size: 1.16rem; color: var(--ink-soft); max-width: var(--measure); margin: 0; }
+
+  section { padding-top: 56px; }
+  h2 {
+    font-family: "Archivo", Arial, sans-serif; font-weight: 600;
+    font-size: clamp(1.45rem, 3vw, 1.95rem); letter-spacing: -.018em;
+    line-height: 1.15; margin: 0 0 14px; text-wrap: balance;
+  }
+  h3 {
+    font-family: "Archivo", Arial, sans-serif; font-weight: 600;
+    font-size: 1.1rem; margin: 32px 0 8px;
+  }
+  p { max-width: var(--measure); margin: 0 0 16px; }
+  .muted { color: var(--ink-soft); }
+
+  code {
+    font-family: "JetBrains Mono", monospace; font-size: .85em;
+    background: var(--surface-alt); padding: 1px 5px; border-radius: 3px;
+  }
+
+  .stage {
+    display: inline-block; font-family: "JetBrains Mono", monospace;
+    font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--accent); background: var(--accent-soft);
+    padding: 4px 10px; border-radius: var(--radius); margin-bottom: 14px;
+  }
+
+  figure {
+    margin: 32px 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 28px 24px 20px;
+    overflow-x: auto;
+  }
+  figure svg { display: block; max-width: 100%; height: auto; margin: 0 auto; color: var(--ink); }
+  figcaption {
+    font-size: .92rem; color: var(--ink-soft); margin-top: 20px;
+    padding-top: 16px; border-top: 1px solid var(--line-soft);
+    max-width: var(--measure);
+  }
+
+  .hi   { stroke: var(--accent); }
+  .hi-f { fill: var(--accent); }
+  .box  { fill: var(--surface-alt); stroke: currentColor; stroke-width: 1.25; }
+  .lane { stroke: currentColor; stroke-width: 1; stroke-dasharray: 3 5; opacity: .45; }
+  .arw  { stroke: currentColor; stroke-width: 1.5; fill: none; }
+  .lbl  { font-family: "JetBrains Mono", monospace; font-size: 11.5px; fill: currentColor; }
+  .lbl-s{ font-family: "JetBrains Mono", monospace; font-size: 10.5px; fill: currentColor; opacity: .68; }
+  .act  { font-family: "Archivo", Arial, sans-serif; font-size: 12.5px; font-weight: 600; fill: currentColor; }
+
+  .note {
+    border-left: 3px solid var(--chalk); padding: 2px 0 2px 18px;
+    margin: 22px 0; color: var(--ink-soft); max-width: var(--measure);
+  }
+  .note strong { color: var(--ink); font-weight: 600; }
+
+  .warnbox {
+    background: var(--warn-soft); border: 1px solid var(--warn);
+    border-radius: var(--radius); padding: 16px 20px; margin: 22px 0;
+    max-width: var(--measure);
+  }
+  .warnbox p { margin: 0; color: var(--ink); }
+  .warnbox strong { color: var(--warn); }
+
+  .table-scroll { overflow-x: auto; margin: 24px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: .95rem; min-width: 560px; }
+  th {
+    font-family: "Archivo", Arial, sans-serif; font-size: 11.5px;
+    letter-spacing: .1em; text-transform: uppercase; text-align: left;
+    color: var(--ink-faint); font-weight: 600;
+    padding: 0 16px 10px 0; border-bottom: 1px solid var(--line);
+  }
+  td { padding: 13px 16px 13px 0; border-bottom: 1px solid var(--line-soft); vertical-align: top; color: var(--ink-soft); }
+  td:first-child { font-family: "JetBrains Mono", monospace; font-size: 12.5px; color: var(--ink); white-space: nowrap; }
+
+  ol, ul { max-width: var(--measure); padding-left: 22px; }
+  li { margin-bottom: 10px; }
+
+  hr.rule { border: 0; border-top: 1px solid var(--line); margin: 0; }
+  a { color: var(--chalk); }
+  a:focus-visible { outline: 2px solid var(--chalk); outline-offset: 3px; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="wrap">
+
+  <header class="head">
+    <p class="eyebrow">8-Ball Pool Manager · Cómo funciona por dentro</p>
+    <h1>Anatomía de una Petición</h1>
+    <p class="lede">
+      Qué pasa exactamente entre que un jugador escribe su contraseña y que su
+      ranking cambia. Quién habla con quién, en qué orden, y por qué.
+    </p>
+  </header>
+
+  <section>
+    <h2>Los cinco personajes</h2>
+    <p>Antes de los flujos, quién es quién. Ninguno hace el trabajo del otro.</p>
+
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th style="width:150px">Pieza</th><th>De qué se ocupa — y de qué no</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Keycloak</td>
+            <td>Guarda usuarios y contraseñas, y emite tokens. <strong>Es el único que ve una contraseña.</strong> No sabe nada de partidas ni de rankings.</td>
+          </tr>
+          <tr>
+            <td>ECS</td>
+            <td>Corre el contenedor con la API. Es quien ejecuta todas las reglas del negocio.</td>
+          </tr>
+          <tr>
+            <td>Aurora</td>
+            <td>La base de datos. Guarda jugadores y partidas. No guarda contraseñas ni imágenes.</td>
+          </tr>
+          <tr>
+            <td>IAM</td>
+            <td>El sistema de permisos de Amazon. Decide qué puede tocar el contenedor dentro de AWS. No tiene nada que ver con los usuarios de tu aplicación.</td>
+          </tr>
+          <tr>
+            <td>S3</td>
+            <td>Guarda los archivos de las fotos. Solo entra en juego en los endpoints de imágenes — en los dos flujos de acá abajo no aparece nunca.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <strong>La confusión más común.</strong> Hay dos sistemas de identidad distintos y no se
+      hablan entre sí. Keycloak dice <em>quién es el jugador</em>. IAM dice <em>qué puede hacer
+      el contenedor</em>. Un jugador nunca tiene identidad en AWS, y el contenedor nunca tiene
+      identidad en Keycloak.
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <span class="stage">Flujo 1 · Paso 1</span>
+    <h2>De la contraseña al token</h2>
+    <p>
+      Esto ocurre <strong>íntegramente fuera de AWS</strong>. La API todavía no se enteró
+      de que existís.
+    </p>
+
+    <figure>
+      <svg viewBox="0 0 760 400" role="img" aria-label="El cliente pide un token a Keycloak con usuario y contraseña; Keycloak devuelve un JWT firmado; la API descarga la clave pública de Keycloak una sola vez y luego valida los tokens localmente sin red.">
+        <defs>
+          <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+          </marker>
+          <marker id="a1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" class="hi-f"/>
+          </marker>
+        </defs>
+
+        <!-- cabeceras -->
+        <rect class="box" x="40"  y="20" width="140" height="34" rx="3"/>
+        <text class="act" x="110" y="42" text-anchor="middle">Cliente</text>
+        <rect class="box" x="310" y="20" width="140" height="34" rx="3"/>
+        <text class="act" x="380" y="42" text-anchor="middle">Keycloak</text>
+        <rect class="box" x="580" y="20" width="140" height="34" rx="3"/>
+        <text class="act" x="650" y="42" text-anchor="middle">API en ECS</text>
+
+        <!-- lineas de vida -->
+        <line class="lane" x1="110" y1="54" x2="110" y2="380"/>
+        <line class="lane" x1="380" y1="54" x2="380" y2="380"/>
+        <line class="lane" x1="650" y1="54" x2="650" y2="380"/>
+
+        <!-- 1 -->
+        <line class="arw" x1="110" y1="100" x2="374" y2="100" marker-end="url(#a1)"/>
+        <text class="lbl" x="242" y="92" text-anchor="middle">usuario + contraseña</text>
+
+        <!-- 2 -->
+        <line class="arw" x1="380" y1="142" x2="116" y2="142" marker-end="url(#a1)"/>
+        <text class="lbl" x="248" y="134" text-anchor="middle">JWT firmado</text>
+        <text class="lbl-s" x="248" y="158" text-anchor="middle">vence en 5 min</text>
+
+        <!-- 3 -->
+        <line class="arw hi" x1="110" y1="212" x2="644" y2="212" marker-end="url(#a1g)"/>
+        <text class="lbl" x="377" y="204" text-anchor="middle">GET /players/me  ·  Authorization: Bearer …</text>
+
+        <!-- 4 -->
+        <line class="arw" x1="650" y1="256" x2="386" y2="256" marker-end="url(#a1)"/>
+        <text class="lbl" x="518" y="248" text-anchor="middle">¿cuál es tu clave pública?</text>
+        <text class="lbl-s" x="518" y="272" text-anchor="middle">SOLO la primera vez</text>
+
+        <!-- 5 -->
+        <line class="arw" x1="380" y1="300" x2="644" y2="300" marker-end="url(#a1)"/>
+        <text class="lbl" x="512" y="292" text-anchor="middle">clave pública (se guarda 24 h)</text>
+
+        <!-- 6 auto -->
+        <path class="arw hi" d="M 650 330 L 712 330 L 712 358 L 656 358" marker-end="url(#a1g)"/>
+        <text class="lbl" x="600" y="352" text-anchor="end">valida firma, emisor, audiencia y vencimiento</text>
+        <text class="lbl-s" x="600" y="374" text-anchor="end">pura matemática local · sin tocar la red</text>
+      </svg>
+      <figcaption>
+        La API consulta a Keycloak una sola vez, para conseguir la clave pública. A partir de ahí
+        valida cada token por su cuenta. Si Keycloak se cayera ahora mismo, los tokens ya emitidos
+        seguirían funcionando hasta vencer.
+      </figcaption>
+    </figure>
+
+    <p>
+      El token que devuelve Keycloak no es un número al azar: es un texto que lleva adentro
+      quién sos, y una firma que prueba que lo emitió Keycloak. Los datos que importan:
+    </p>
+
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th style="width:170px">Dato dentro del token</th><th>Para qué lo usa la API</th></tr></thead>
+        <tbody>
+          <tr><td>sub</td><td>Tu identificador único. Es lo que se guarda en la base como <code>KeycloakId</code> y lo que conecta el token con tu fila.</td></tr>
+          <tr><td>preferred_username</td><td>Tu nombre. Se usa la primera vez, al crear tu jugador.</td></tr>
+          <tr><td>realm_access.roles</td><td>Tus roles. De acá sale si sos administrador.</td></tr>
+          <tr><td>aud</td><td>Para quién es el token. Si dice otra aplicación, se rechaza.</td></tr>
+          <tr><td>exp</td><td>Cuándo vence.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <span class="stage">Flujo 1 · Paso 2</span>
+    <h2>Qué es IAM, y por qué la base no tiene contraseña</h2>
+
+    <p>
+      IAM es el sistema de permisos de Amazon. Su unidad básica es el <strong>rol</strong>:
+      un conjunto de permisos que algo puede asumir. Nuestro contenedor asume el rol
+      <code>poolmanager-task-role</code>, cuyos permisos son exactamente tres: conectarse
+      a ese usuario de esa base, leer y escribir objetos en ese bucket, y listar ese bucket.
+      Nada más.
+    </p>
+
+    <p>
+      La parte interesante es cómo se conecta a la base. <strong>No hay contraseña en ningún
+      lado.</strong> Ni en el código, ni en las variables de entorno, ni dentro de la imagen.
+      En su lugar, la aplicación fabrica una contraseña temporal cada vez que hace falta:
+    </p>
+
+    <figure>
+      <svg viewBox="0 0 780 250" role="img" aria-label="ECS entrega credenciales temporales del rol al contenedor; la aplicación firma localmente un token de quince minutos; lo usa como contraseña contra Aurora; Aurora consulta a IAM si la firma es válida.">
+        <defs>
+          <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <rect class="box" x="20"  y="70" width="150" height="66" rx="3"/>
+        <text class="act" x="95" y="98"  text-anchor="middle">ECS</text>
+        <text class="lbl-s" x="95" y="118" text-anchor="middle">entrega credenciales</text>
+
+        <line class="arw" x1="170" y1="103" x2="222" y2="103" marker-end="url(#a2)"/>
+
+        <rect class="box" x="228" y="70" width="170" height="66" rx="3"/>
+        <text class="act" x="313" y="98"  text-anchor="middle">La aplicación</text>
+        <text class="lbl-s" x="313" y="118" text-anchor="middle">firma un token de 15 min</text>
+
+        <line class="arw" x1="398" y1="103" x2="450" y2="103" marker-end="url(#a2)"/>
+        <text class="lbl" x="424" y="88" text-anchor="middle">lo usa</text>
+        <text class="lbl" x="424" y="128" text-anchor="middle">de contraseña</text>
+
+        <rect class="box" x="456" y="70" width="150" height="66" rx="3"/>
+        <text class="act" x="531" y="98"  text-anchor="middle">Aurora</text>
+        <text class="lbl-s" x="531" y="118" text-anchor="middle">recibe la conexión</text>
+
+        <line class="arw" x1="606" y1="103" x2="658" y2="103" marker-end="url(#a2)"/>
+
+        <rect class="box" x="664" y="70" width="96" height="66" rx="3"/>
+        <text class="act" x="712" y="98"  text-anchor="middle">IAM</text>
+        <text class="lbl-s" x="712" y="118" text-anchor="middle">¿es válida?</text>
+
+        <!-- ciclo -->
+        <path class="arw hi" d="M 313 148 L 313 186 L 95 186 L 95 148" marker-end="url(#a2)"/>
+        <text class="lbl" x="204" y="208" text-anchor="middle">se repite cada 14 minutos, en segundo plano</text>
+        <text class="lbl-s" x="204" y="228" text-anchor="middle">nunca en medio de una consulta</text>
+      </svg>
+      <figcaption>
+        El token es una firma calculada con las credenciales del rol. Generarlo no requiere
+        salir a la red: es matemática local. Quien sí consulta a IAM es Aurora, al recibir la conexión.
+      </figcaption>
+    </figure>
+
+    <h3>Por qué esto es mejor que una contraseña</h3>
+    <ul>
+      <li><strong>No hay nada que robar.</strong> Si alguien logra ver las variables de entorno del contenedor, encuentra una cadena de conexión sin credencial.</li>
+      <li><strong>Vence solo.</strong> Aunque interceptaran un token, sirve 15 minutos.</li>
+      <li><strong>No hay que rotar nada a mano.</strong> No existe el momento incómodo de cambiar la contraseña de producción.</li>
+      <li><strong>El permiso es revocable al instante.</strong> Sacás el permiso del rol en IAM y la próxima conexión falla, sin tocar la base ni la aplicación.</li>
+    </ul>
+
+    <div class="warnbox">
+      <p>
+        <strong>El costo:</strong> si el permiso del rol está mal escrito, la base rechaza la
+        conexión con un error de autenticación que no menciona IAM por ningún lado. Es
+        exactamente el tipo de falla que cuesta encontrar la primera vez.
+      </p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <span class="stage">Flujo 1 · Paso 3</span>
+    <h2>Registro y creación de una partida</h2>
+
+    <p>
+      Con el token en la mano, el jugador hace su primera llamada. Acá aparece Aurora por
+      primera vez.
+    </p>
+
+    <h3>Qué guarda Aurora, exactamente</h3>
+    <p>Dos tablas. Nada más que dos tablas.</p>
+
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th style="width:120px">Tabla</th><th>Columnas</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Players</td>
+            <td><code>Id</code> · <code>KeycloakId</code> · <code>Name</code> · <code>Wins</code> · <code>PreferredCue</code> · <code>ProfilePictureKey</code></td>
+          </tr>
+          <tr>
+            <td>Matches</td>
+            <td><code>Id</code> · <code>Player1Id</code> · <code>Player2Id</code> · <code>StartTime</code> · <code>EndTime</code> · <code>WinnerId</code> · <code>TableNumber</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="muted">
+      Fijate lo que <em>no</em> está: contraseñas (viven en Keycloak), las imágenes (viven en S3,
+      acá solo se guarda su ubicación), y la posición en el ranking (no se guarda en ningún lado —
+      ya vamos a eso).
+    </p>
+
+    <figure>
+      <svg viewBox="0 0 700 470" role="img" aria-label="Primera llamada: la API busca al jugador por su identificador de Keycloak, no lo encuentra y lo crea. Luego al crear una partida hace cuatro verificaciones contra la base antes de insertarla.">
+        <defs>
+          <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+          </marker>
+          <marker id="a3g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" class="hi-f"/>
+          </marker>
+        </defs>
+
+        <rect class="box" x="60"  y="20" width="150" height="34" rx="3"/>
+        <text class="act" x="135" y="42" text-anchor="middle">API en ECS</text>
+        <rect class="box" x="470" y="20" width="150" height="34" rx="3"/>
+        <text class="act" x="545" y="42" text-anchor="middle">Aurora</text>
+
+        <line class="lane" x1="135" y1="54" x2="135" y2="450"/>
+        <line class="lane" x1="545" y1="54" x2="545" y2="450"/>
+
+        <text class="lbl-s" x="60" y="88">GET /players/me</text>
+
+        <line class="arw" x1="135" y1="112" x2="539" y2="112" marker-end="url(#a3)"/>
+        <text class="lbl" x="337" y="104" text-anchor="middle">buscá el jugador con este KeycloakId</text>
+
+        <line class="arw" x1="545" y1="150" x2="141" y2="150" marker-end="url(#a3)"/>
+        <text class="lbl" x="343" y="142" text-anchor="middle">no existe</text>
+
+        <line class="arw hi" x1="135" y1="188" x2="539" y2="188" marker-end="url(#a3g)"/>
+        <text class="lbl" x="337" y="180" text-anchor="middle">creá una fila nueva  ←  auto-registro</text>
+
+        <line class="lane" x1="40" y1="216" x2="660" y2="216"/>
+        <text class="lbl-s" x="60" y="248">POST /matches</text>
+
+        <line class="arw" x1="135" y1="272" x2="539" y2="272" marker-end="url(#a3)"/>
+        <text class="lbl" x="337" y="264" text-anchor="middle">1 · ¿quién soy yo? (por KeycloakId)</text>
+
+        <line class="arw" x1="135" y1="310" x2="539" y2="310" marker-end="url(#a3)"/>
+        <text class="lbl" x="337" y="302" text-anchor="middle">2 · ¿existen los dos jugadores?</text>
+
+        <line class="arw" x1="135" y1="348" x2="539" y2="348" marker-end="url(#a3)"/>
+        <text class="lbl" x="337" y="340" text-anchor="middle">3 · ¿alguno ya juega a esa hora?</text>
+
+        <line class="arw" x1="135" y1="386" x2="539" y2="386" marker-end="url(#a3)"/>
+        <text class="lbl" x="337" y="378" text-anchor="middle">4 · ¿la mesa está ocupada?</text>
+
+        <line class="arw hi" x1="135" y1="428" x2="539" y2="428" marker-end="url(#a3g)"/>
+        <text class="lbl" x="337" y="420" text-anchor="middle">guardá la partida</text>
+      </svg>
+      <figcaption>
+        Entre el pedido y el guardado hay cuatro preguntas a la base. Si alguna falla, no se
+        escribe nada y el jugador recibe el motivo exacto.
+      </figcaption>
+    </figure>
+
+    <p>
+      La verificación de permisos —que seas uno de los dos jugadores— no aparece en el dibujo
+      porque no consulta la base: se resuelve comparando tu identificador con los dos de la
+      partida, en memoria, antes de la primera consulta.
+    </p>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <span class="stage">Flujo 2</span>
+    <h2>Declarar el ganador</h2>
+
+    <p>
+      El jugador manda <code>PATCH /matches/3</code> con <code>{"winnerId": 7}</code>. El token
+      se valida igual que siempre, sin salir a la red. Lo interesante pasa después.
+    </p>
+
+    <figure>
+      <svg viewBox="0 0 700 400" role="img" aria-label="Al declarar un ganador la API resta una victoria al ganador anterior y suma una al nuevo, dentro de una sola transacción. La posición del ranking no se guarda: se calcula al consultar.">
+        <defs>
+          <marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+          </marker>
+          <marker id="a4g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" class="hi-f"/>
+          </marker>
+        </defs>
+
+        <rect class="box" x="60"  y="20" width="150" height="34" rx="3"/>
+        <text class="act" x="135" y="42" text-anchor="middle">API en ECS</text>
+        <rect class="box" x="470" y="20" width="150" height="34" rx="3"/>
+        <text class="act" x="545" y="42" text-anchor="middle">Aurora</text>
+
+        <line class="lane" x1="135" y1="54" x2="135" y2="380"/>
+        <line class="lane" x1="545" y1="54" x2="545" y2="380"/>
+
+        <line class="arw" x1="135" y1="96" x2="539" y2="96" marker-end="url(#a4)"/>
+        <text class="lbl" x="337" y="88" text-anchor="middle">traeme la partida 3 y sus jugadores</text>
+
+        <text class="lbl-s" x="60" y="132">¿participo? ¿el ganador es uno de los dos?</text>
+        <text class="lbl-s" x="60" y="150">— en memoria, sin consultar —</text>
+
+        <!-- transaccion -->
+        <rect x="100" y="176" width="520" height="118" rx="3" fill="none" class="hi" stroke-dasharray="4 4"/>
+        <text class="lbl hi-f" x="112" y="196">una sola transacción</text>
+
+        <line class="arw" x1="135" y1="224" x2="539" y2="224" marker-end="url(#a4)"/>
+        <text class="lbl" x="337" y="216" text-anchor="middle">ganador anterior:  Wins − 1</text>
+
+        <line class="arw" x1="135" y1="266" x2="539" y2="266" marker-end="url(#a4)"/>
+        <text class="lbl" x="337" y="258" text-anchor="middle">ganador nuevo:  Wins + 1</text>
+
+        <line class="arw hi" x1="135" y1="330" x2="539" y2="330" marker-end="url(#a4g)"/>
+        <text class="lbl" x="337" y="322" text-anchor="middle">devolveme la partida actualizada</text>
+        <text class="lbl-s" x="337" y="354" text-anchor="middle">el ranking NO se escribe en ningún lado</text>
+      </svg>
+      <figcaption>
+        Restar antes de sumar es lo que hace que corregir un resultado sea seguro. Sin ese paso,
+        cambiar de opinión sobre quién ganó dejaba una victoria fantasma en la cuenta de los dos.
+      </figcaption>
+    </figure>
+
+    <h3>Y entonces, ¿cuándo se actualiza el ranking?</h3>
+    <p>
+      Nunca, porque el ranking no existe como dato guardado. Lo único que cambió en la base
+      fueron dos números en la columna <code>Wins</code>.
+    </p>
+    <p>
+      La posición se calcula recién cuando alguien la pide. Al consultar un perfil, la API
+      pregunta: <em>¿cuántos jugadores tienen más victorias que este?</em> Si la respuesta es
+      cero, es el puesto 1. Si es cuatro, el puesto 5.
+    </p>
+
+    <div class="note">
+      <strong>Por qué se hace así.</strong> Si la posición estuviera guardada, cada victoria
+      obligaría a recalcular y reescribir la fila de <em>todos</em> los jugadores que quedaron
+      por debajo. Calcularla al momento cuesta una consulta y siempre está bien. Además, los
+      empates salen gratis: dos jugadores con la misma cantidad de victorias comparten posición.
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <h2>El resumen en una línea</h2>
+    <ol>
+      <li><strong>Keycloak</strong> te da un token cuando probás quién sos. Ocurre una vez cada 5 minutos y no toca AWS.</li>
+      <li><strong>ECS</strong> recibe el pedido y valida ese token por su cuenta, con una clave pública que descargó una única vez.</li>
+      <li><strong>IAM</strong> le da al contenedor una identidad dentro de AWS, con la que fabrica una contraseña temporal para la base. Se renueva sola cada 14 minutos.</li>
+      <li><strong>Aurora</strong> guarda jugadores y partidas. Se consulta varias veces por pedido: una para saber quién sos, y las demás para verificar cada regla.</li>
+      <li><strong>El ranking</strong> no se guarda: se deduce de las victorias en el momento en que se lo pide.</li>
+    </ol>
+  </section>
+
+</div>

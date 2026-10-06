@@ -1,0 +1,701 @@
+<title>Planos del Pool Manager</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+  /* ---- Paleta: tomada del mundo del billar ----
+     paño (verde profundo), tiza (azul), marfil (bola blanca), madera del riel */
+  :root {
+    --ground:      #F2F4F1;
+    --surface:     #FBFCFA;
+    --surface-alt: #E9EDE8;
+    --line:        #D2DAD1;
+    --line-soft:   #E2E8E0;
+
+    --ink:         #16211C;
+    --ink-soft:    #4A5852;
+    --ink-faint:   #74827B;
+
+    --accent:      #0F5D4A;   /* paño */
+    --accent-soft: #DCEBE4;
+    --chalk:       #2C5C8F;   /* tiza */
+
+    --warn:        #9A6410;
+    --warn-soft:   #F6ECD8;
+    --danger:      #A2382C;
+    --danger-soft: #F7E3E0;
+
+    --radius: 4px;
+    --measure: 68ch;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0E1512;
+      --surface:     #16201C;
+      --surface-alt: #1D2925;
+      --line:        #2B3833;
+      --line-soft:   #232F2A;
+
+      --ink:         #E6EDE8;
+      --ink-soft:    #A7B5AE;
+      --ink-faint:   #7C8B84;
+
+      --accent:      #56B394;
+      --accent-soft: #16332A;
+      --chalk:       #7FAEDC;
+
+      --warn:        #D6A44A;
+      --warn-soft:   #33280F;
+      --danger:      #E08375;
+      --danger-soft: #38201C;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:      #0E1512;
+    --surface:     #16201C;
+    --surface-alt: #1D2925;
+    --line:        #2B3833;
+    --line-soft:   #232F2A;
+
+    --ink:         #E6EDE8;
+    --ink-soft:    #A7B5AE;
+    --ink-faint:   #7C8B84;
+
+    --accent:      #56B394;
+    --accent-soft: #16332A;
+    --chalk:       #7FAEDC;
+
+    --warn:        #D6A44A;
+    --warn-soft:   #33280F;
+    --danger:      #E08375;
+    --danger-soft: #38201C;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size: 17px;
+    line-height: 1.62;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 24px 96px;
+  }
+
+  /* ---------- Encabezado ---------- */
+  .head {
+    padding: 72px 0 40px;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 8px;
+  }
+  .eyebrow {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 18px;
+  }
+  h1 {
+    font-family: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    font-weight: 700;
+    font-size: clamp(2.4rem, 6vw, 4rem);
+    line-height: 1.02;
+    letter-spacing: -0.025em;
+    margin: 0 0 20px;
+    text-wrap: balance;
+  }
+  .lede {
+    font-size: 1.18rem;
+    color: var(--ink-soft);
+    max-width: var(--measure);
+    margin: 0;
+  }
+
+  /* ---------- Secciones ---------- */
+  section { padding-top: 56px; }
+
+  h2 {
+    font-family: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    font-weight: 600;
+    font-size: clamp(1.5rem, 3vw, 2rem);
+    letter-spacing: -0.018em;
+    line-height: 1.15;
+    margin: 0 0 8px;
+    text-wrap: balance;
+  }
+  h3 {
+    font-family: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    font-weight: 600;
+    font-size: 1.12rem;
+    letter-spacing: -0.01em;
+    margin: 0 0 6px;
+  }
+  p { max-width: var(--measure); margin: 0 0 16px; }
+  .muted { color: var(--ink-soft); }
+
+  /* Ruta de carpeta como etiqueta */
+  .path {
+    display: inline-block;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-soft);
+    padding: 3px 9px;
+    border-radius: var(--radius);
+    margin-bottom: 14px;
+  }
+
+  code, .mono {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.86em;
+  }
+  p code, li code, td code {
+    background: var(--surface-alt);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  /* ---------- Árbol ---------- */
+  .tree {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 24px 26px;
+    overflow-x: auto;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 13.5px;
+    line-height: 1.85;
+    white-space: pre;
+    color: var(--ink-soft);
+  }
+  .tree b { color: var(--ink); font-weight: 600; }
+  .tree i { color: var(--ink-faint); font-style: normal; }
+
+  /* ---------- Tarjetas de archivo ---------- */
+  .files {
+    display: grid;
+    gap: 1px;
+    background: var(--line-soft);
+    border: 1px solid var(--line-soft);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-top: 20px;
+  }
+  .file {
+    background: var(--surface);
+    padding: 18px 20px;
+    display: grid;
+    grid-template-columns: minmax(190px, 250px) 1fr;
+    gap: 4px 28px;
+    align-items: start;
+  }
+  .file > .name {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    word-break: break-word;
+    padding-top: 2px;
+  }
+  .file > .what { margin: 0; max-width: var(--measure); }
+  .file > .what + .what { margin-top: 8px; grid-column: 2; }
+
+  @media (max-width: 680px) {
+    .file { grid-template-columns: 1fr; gap: 6px; }
+    .file > .what + .what { grid-column: 1; }
+  }
+
+  /* ---------- Analogía / nota ---------- */
+  .note {
+    border-left: 3px solid var(--chalk);
+    padding: 2px 0 2px 18px;
+    margin: 20px 0;
+    color: var(--ink-soft);
+    max-width: var(--measure);
+  }
+  .note strong { color: var(--ink); font-weight: 600; }
+
+  /* ---------- Flujo en 4 pasos ---------- */
+  .flow {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 16px;
+    margin: 28px 0 8px;
+  }
+  .step {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--accent);
+    border-radius: var(--radius);
+    padding: 18px 20px 20px;
+  }
+  .step .n {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    color: var(--ink-faint);
+    display: block;
+    margin-bottom: 8px;
+  }
+  .step h3 { margin-bottom: 6px; }
+  .step p { font-size: 0.94rem; margin: 0; color: var(--ink-soft); }
+
+  /* ---------- Tabla ---------- */
+  .table-scroll { overflow-x: auto; margin-top: 24px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95rem;
+    min-width: 620px;
+  }
+  th {
+    font-family: "Archivo", Arial, sans-serif;
+    font-size: 11.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    text-align: left;
+    color: var(--ink-faint);
+    font-weight: 600;
+    padding: 0 16px 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  td {
+    padding: 14px 16px 14px 0;
+    border-bottom: 1px solid var(--line-soft);
+    vertical-align: top;
+    color: var(--ink-soft);
+  }
+  td:first-child {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 12.5px;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+
+  .chip {
+    display: inline-block;
+    font-family: "Archivo", Arial, sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 4px 9px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  .chip.keep   { background: var(--surface-alt); color: var(--ink-soft); border: 1px solid var(--line); }
+  .chip.del    { background: var(--warn-soft);   color: var(--warn);     border: 1px solid var(--warn); }
+  .chip.never  { background: var(--danger-soft); color: var(--danger);   border: 1px solid var(--danger); }
+
+  hr.rule {
+    border: 0;
+    border-top: 1px solid var(--line);
+    margin: 0;
+  }
+
+  ul { max-width: var(--measure); padding-left: 20px; }
+  li { margin-bottom: 8px; }
+
+  a { color: var(--chalk); }
+  a:focus-visible, .file:focus-visible { outline: 2px solid var(--chalk); outline-offset: 3px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="head">
+    <p class="eyebrow">8-Ball Pool Manager · Guía de estructura</p>
+    <h1>Planos del Pool Manager</h1>
+    <p class="lede">
+      Qué hay en cada carpeta, para qué sirve cada archivo, y qué se puede borrar sin
+      romper nada. Escrito para leerse sin saber .NET.
+    </p>
+  </header>
+
+  <section>
+    <h2>La idea en cuatro pasos</h2>
+    <p>
+      Todo el proyecto existe para responder una pregunta: alguien pide algo por internet
+      y hay que contestarle. Ese pedido atraviesa siempre las mismas cuatro estaciones, y
+      cada carpeta principal es una de ellas.
+    </p>
+
+    <div class="flow">
+      <div class="step">
+        <span class="n">RECIBE</span>
+        <h3>Controller</h3>
+        <p>Atiende el pedido que llega de afuera y devuelve la respuesta. No decide nada por su cuenta.</p>
+      </div>
+      <div class="step">
+        <span class="n">DECIDE</span>
+        <h3>Services</h3>
+        <p>Acá viven las reglas: quién puede hacer qué, si una mesa está ocupada, cómo se cuentan las victorias.</p>
+      </div>
+      <div class="step">
+        <span class="n">GUARDA</span>
+        <h3>Data + Models</h3>
+        <p>La forma de la información, y el único módulo que habla con la base de datos.</p>
+      </div>
+      <div class="step">
+        <span class="n">ENTREGA</span>
+        <h3>DTO</h3>
+        <p>Lo que sale hacia afuera. Nunca se devuelve la información interna tal cual está guardada.</p>
+      </div>
+    </div>
+
+    <div class="note">
+      <strong>Por qué importa el orden.</strong> Un controller nunca habla directamente con la
+      base de datos, y un servicio nunca sabe que existe internet. Si algo se rompe, esa
+      separación te dice de entrada en qué carpeta buscar.
+    </div>
+  </section>
+
+  <section>
+    <h2>El árbol completo</h2>
+    <div class="tree"><b>8-Ball Pool Manager API/</b>
+├── <b>Controller/</b>          <i>atiende los pedidos que llegan</i>
+├── <b>Services/</b>            <i>las reglas del negocio</i>
+├── <b>DTO/</b>                 <i>la forma de lo que entra y sale</i>
+├── <b>Models/</b>              <i>la forma de lo que se guarda</i>
+├── <b>Data/</b>                <i>todo el acceso a la base, aislado</i>
+├── <b>Migrations/</b>          <i>el historial de cambios de la base</i>
+├── <b>Infrastructure/</b>      <i>piezas técnicas de apoyo</i>
+├── <b>PoolManager.Tests/</b>   <i>las pruebas automáticas</i>
+├── <b>Properties/</b>          <i>configuración para correrlo en tu máquina</i>
+├── <b>.github/workflows/</b>   <i>el robot que despliega solo</i>
+├── <b>docs/</b>                <i>esta guía</i>
+│
+├── Program.cs             <i>el arranque: enciende y conecta todo</i>
+├── appsettings.json       <i>configuración pública</i>
+├── Dockerfile             <i>la receta para empaquetar la app</i>
+├── docker-compose.yml     <i>levanta el entorno local completo</i>
+├── migrate.sql            <i>el guion para actualizar la base en AWS</i>
+└── readme.md              <i>la documentación principal</i></div>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <span class="path">Controller/</span>
+    <h2>La recepción</h2>
+    <p>
+      Es la puerta de entrada. Cada archivo se ocupa de un tema y traduce una dirección web
+      —como <code>/players/me</code>— en una acción concreta. Su trabajo es pedirle el
+      trabajo real a un servicio y devolver el resultado con el código correcto: 200 si salió
+      bien, 404 si no existe, 403 si no tenés permiso.
+    </p>
+
+    <div class="files">
+      <div class="file">
+        <div class="name">PlayersController.cs</div>
+        <p class="what">Todo lo relacionado con jugadores: ver tu perfil, actualizarlo, y —solo para administradores— listar, crear o eliminar jugadores.</p>
+        <p class="what muted">Acá vive la validación de que la foto de perfil que mandás sea realmente tuya.</p>
+      </div>
+      <div class="file">
+        <div class="name">MatchesController.cs</div>
+        <p class="what">Las partidas: crearlas, listarlas, ver el detalle de una, declarar el ganador y eliminarlas.</p>
+        <p class="what muted">Traduce los errores del servicio al código correcto. Si no participás en una partida, devuelve "no existe" en lugar de "no tenés permiso", para no confirmarle a un curioso que esa partida existe.</p>
+      </div>
+      <div class="file">
+        <div class="name">StorageController.cs</div>
+        <p class="what">Las fotos. Entrega enlaces temporales y firmados para subir o ver imágenes, sin que el archivo pase nunca por la API.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <span class="path">Services/</span>
+    <h2>Donde se piensa</h2>
+    <p>
+      El cerebro. Si mañana esta aplicación dejara de ser una API y pasara a ser un programa
+      de escritorio, esta carpeta sobreviviría intacta: no sabe nada de internet.
+    </p>
+
+    <div class="files">
+      <div class="file">
+        <div class="name">PlayerService.cs</div>
+        <p class="what">Crea, busca y actualiza jugadores. Registra automáticamente a alguien la primera vez que entra.</p>
+        <p class="what muted">Calcula el puesto en el ranking. La posición no se guarda: se deduce cada vez a partir de las victorias, porque si se guardara habría que reescribir la tabla entera cada vez que alguien gana.</p>
+      </div>
+      <div class="file">
+        <div class="name">MatchService.cs</div>
+        <p class="what">El archivo con más reglas del proyecto: verifica que nadie agende dos partidas al mismo tiempo, que una mesa no esté ocupada, que la hora de fin sea posterior a la de inicio, y que solo los participantes puedan tocar una partida.</p>
+        <p class="what muted">También lleva la cuenta de victorias. Al corregir un ganador, se la resta al anterior antes de dársela al nuevo.</p>
+      </div>
+      <div class="file">
+        <div class="name">S3Service.cs</div>
+        <p class="what">Habla con el servicio de almacenamiento de Amazon. Arma los enlaces temporales para subir y descargar imágenes, y decide en qué carpeta va cada foto.</p>
+        <p class="what muted">Cada jugador tiene su propia carpeta. Esa separación es la que impide que alguien use la imagen de otro.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <span class="path">DTO/</span>
+    <h2>El mostrador</h2>
+    <p>
+      DTO significa "objeto para transportar datos". Son la versión pública de la información:
+      definen exactamente qué campos entran y cuáles salen.
+    </p>
+
+    <div class="note">
+      <strong>Por qué no se devuelve la información tal cual está guardada.</strong> Un jugador
+      guardado internamente tiene un identificador de su cuenta de Keycloak. Si se devolviera
+      el objeto completo, ese dato quedaría expuesto. El DTO es el filtro que garantiza que
+      solo salga lo que corresponde.
+    </div>
+
+    <div class="files">
+      <div class="file">
+        <div class="name">PlayerDtos.cs</div>
+        <p class="what">Tres formas de un jugador: la de crearlo, la de actualizarlo y la que se devuelve. La de actualizar no incluye las victorias, así que nadie puede regalarse puntos escribiéndolos en el pedido.</p>
+      </div>
+      <div class="file">
+        <div class="name">MatchDtos.cs</div>
+        <p class="what">Lo mismo para las partidas. La respuesta incluye los nombres de los jugadores y un estado calculado: próxima, en curso o terminada.</p>
+      </div>
+      <div class="file">
+        <div class="name">StorageDtos.cs</div>
+        <p class="what">Las respuestas de los enlaces de imágenes, con el tiempo que tardan en vencer.</p>
+      </div>
+      <div class="file">
+        <div class="name">ErrorDto.cs</div>
+        <p class="what">El formato único de todos los errores de la API. Existe para que la documentación automática pueda mostrar cómo se ve un error, no solo su número.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <span class="path">Models/ · Data/ · Migrations/</span>
+    <h2>La memoria</h2>
+    <p>
+      Tres carpetas que trabajan juntas: una define cómo es la información, otra la conecta
+      con la base de datos, y la tercera guarda el historial de todos los cambios que sufrió
+      esa base desde el primer día.
+    </p>
+
+    <div class="files">
+      <div class="file">
+        <div class="name">Models/Player.cs</div>
+        <p class="what">Un jugador: nombre, victorias, taco preferido, la ubicación de su foto y el identificador de su cuenta.</p>
+      </div>
+      <div class="file">
+        <div class="name">Models/Match.cs</div>
+        <p class="what">Una partida: los dos jugadores, cuándo empieza y termina, la mesa y quién ganó.</p>
+      </div>
+      <div class="file">
+        <div class="name">Data/AppDbContext.cs</div>
+        <p class="what">El traductor entre el código y la base de datos. Define las relaciones —una partida tiene dos jugadores— y las reglas de la tabla, como que no puedan existir dos jugadores con la misma cuenta.</p>
+        <p class="what muted">También declara que borrar un jugador no borre sus partidas en cascada. Preferimos que falle a perder información.</p>
+      </div>
+      <div class="file">
+        <div class="name">Data/IRepositorioDatos.cs</div>
+        <p class="what">El contrato del módulo de datos: la lista de todo lo que se le puede pedir a la base, escrita en términos del negocio ("buscar una partida que se solape") y no en términos de consultas.</p>
+        <p class="what muted">Los servicios dependen de este archivo. Es lo que permite cambiar de base de datos sin tocarlos.</p>
+      </div>
+      <div class="file">
+        <div class="name">Data/RepositorioEfCore.cs</div>
+        <p class="what">La implementación de ese contrato sobre PostgreSQL. Es el <strong>único archivo del proyecto</strong> que escribe consultas o menciona la herramienta de acceso a datos.</p>
+        <p class="what muted">Para migrar a otro motor se escribe un archivo hermano y se cambia una línea en <code>Program.cs</code>. Nada más se toca.</p>
+      </div>
+      <div class="file">
+        <div class="name">Migrations/ <span class="muted">(7 archivos)</span></div>
+        <p class="what">El historial de la base de datos, en orden cronológico. Cada migración describe un cambio: crear las tablas, agregar un índice, renombrar columnas.</p>
+        <p class="what muted">Los archivos terminados en <code>.Designer.cs</code> y el <code>ModelSnapshot</code> son generados automáticamente. No se editan a mano, pero sin ellos el sistema no sabe calcular el próximo cambio.</p>
+      </div>
+    </div>
+
+    <div class="note">
+      <strong>Una migración no es un archivo descartable.</strong> Es la única forma de
+      reconstruir la base desde cero, y la referencia que usa el sistema para saber qué cambió
+      desde la última vez. Volvemos sobre esto al final.
+    </div>
+  </section>
+
+  <section>
+    <span class="path">Infrastructure/</span>
+    <h2>Los soportes</h2>
+    <p>
+      Piezas técnicas que no son ni reglas de negocio ni atención de pedidos, pero que hacen
+      falta para que todo lo demás funcione.
+    </p>
+
+    <div class="files">
+      <div class="file">
+        <div class="name">ApiControllerBase.cs</div>
+        <p class="what">Código común a los tres controllers: cómo averiguar quién está haciendo el pedido y si es administrador. Evita repetir lo mismo tres veces.</p>
+      </div>
+      <div class="file">
+        <div class="name">DatabaseHealthCheck.cs</div>
+        <p class="what">Comprueba que la base de datos responda de verdad. Alimenta la dirección <code>/health/ready</code>.</p>
+        <p class="what muted">Deliberadamente separado de <code>/health</code>, que es el que vigila Amazon: si el control de Amazon dependiera de la base, una demora pasajera haría que apagara la aplicación entera.</p>
+      </div>
+      <div class="file">
+        <div class="name">KeycloakUrlRewriteHandler.cs</div>
+        <p class="what">Un traductor de direcciones para el sistema de login, escrito cuando Keycloak vivía detrás de dos direcciones distintas.</p>
+        <p class="what muted">Hoy no se activa nunca, porque la configuración usa una sola dirección. Queda como red de seguridad si eso cambiara.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <span class="path">PoolManager.Tests/</span>
+    <h2>Las pruebas</h2>
+    <p>
+      22 pruebas automáticas que se ejecutan solas en cada cambio. Si alguna falla, el
+      despliegue se detiene antes de llegar a producción.
+    </p>
+
+    <div class="files">
+      <div class="file">
+        <div class="name">PlayerServiceTests.cs</div>
+        <p class="what">Verifica el registro automático, el cálculo del ranking, los empates, y que no se pueda borrar un jugador que tiene partidas.</p>
+      </div>
+      <div class="file">
+        <div class="name">MatchServiceTests.cs</div>
+        <p class="what">La mayor parte de las pruebas. Cubre los horarios solapados, las mesas ocupadas, los permisos, y el conteo de victorias al corregir un ganador.</p>
+      </div>
+      <div class="file">
+        <div class="name">Helpers/TestDbContext.cs</div>
+        <p class="what">Arma una base de datos falsa en memoria para cada prueba, así ninguna toca la base real ni se pisa con las demás.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <span class="path">Archivos sueltos en la raíz</span>
+    <h2>El resto</h2>
+
+    <div class="files">
+      <div class="file">
+        <div class="name">Program.cs</div>
+        <p class="what">El arranque. Enciende la aplicación y conecta todas las piezas en el orden correcto: la base de datos, el login, la documentación automática, el límite de pedidos y el manejo de errores.</p>
+        <p class="what muted">El archivo más importante para entender el conjunto. El orden en que aparecen las cosas acá es el orden en que un pedido las atraviesa.</p>
+      </div>
+      <div class="file">
+        <div class="name">appsettings.json</div>
+        <p class="what">Configuración que puede verse públicamente: direcciones y nombres. No contiene ninguna contraseña.</p>
+      </div>
+      <div class="file">
+        <div class="name">appsettings.Development.json</div>
+        <p class="what">Las claves de desarrollo local. No se sube al repositorio, y por eso no viaja dentro de la aplicación empaquetada.</p>
+      </div>
+      <div class="file">
+        <div class="name">Dockerfile</div>
+        <p class="what">La receta para empaquetar la aplicación en una caja que funcione igual en cualquier computadora.</p>
+      </div>
+      <div class="file">
+        <div class="name">docker-compose.yml</div>
+        <p class="what">Levanta el entorno completo en tu máquina con un solo comando: base de datos, sistema de login, almacenamiento de imágenes y la API.</p>
+      </div>
+      <div class="file">
+        <div class="name">migrate.sql</div>
+        <p class="what">Todas las migraciones traducidas a instrucciones que la base de datos entiende directamente. Es lo que se pega en la consola de Amazon para actualizar la base en la nube.</p>
+      </div>
+      <div class="file">
+        <div class="name">.github/workflows/ci.yml</div>
+        <p class="what">El robot. En cada cambio subido: compila, corre las 22 pruebas, empaqueta la aplicación, la sube a Amazon y la despliega.</p>
+      </div>
+      <div class="file">
+        <div class="name">Properties/launchSettings.json</div>
+        <p class="what">Le dice a tu editor en qué dirección abrir la aplicación cuando la ejecutás localmente. Solo aplica en tu máquina.</p>
+      </div>
+      <div class="file">
+        <div class="name">readme.md</div>
+        <p class="what">La documentación principal: cómo instalarlo, la lista de direcciones disponibles, la arquitectura en la nube y cómo desplegar.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <h2>Qué se puede borrar</h2>
+    <p>
+      Preguntabas específicamente por <code>migrate.sql</code> y por <code>Migrations/</code>.
+      Los dos se quedan, y el segundo es de los archivos más delicados del proyecto.
+    </p>
+
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Archivo o carpeta</th><th style="width:130px">Veredicto</th><th>Por qué</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Migrations/</td>
+            <td><span class="chip never">Nunca</span></td>
+            <td>Es el historial de la base de datos. Sin esta carpeta no se puede reconstruir la base desde cero, ni calcular el próximo cambio: el sistema compara contra el último estado registrado acá. Borrarla es el error más caro que se puede cometer en este proyecto.</td>
+          </tr>
+          <tr>
+            <td>migrate.sql</td>
+            <td><span class="chip keep">Se queda</span></td>
+            <td>Es la traducción de las migraciones al idioma de la base. Se puede regenerar con una herramienta, pero es exactamente lo que se pega en la consola de Amazon para actualizar la base en la nube. Tenerlo versionado deja constancia de qué se ejecutó y cuándo.</td>
+          </tr>
+          <tr>
+            <td>PoolManager.http</td>
+            <td><span class="chip del">Borrable</span></td>
+            <td>Sobra de la plantilla original de .NET. Todavía apunta a <code>/weatherforecast/</code>, un endpoint de ejemplo que este proyecto nunca tuvo. La colección de Postman lo reemplaza con ventaja.</td>
+          </tr>
+          <tr>
+            <td>bin/ y obj/</td>
+            <td><span class="chip del">Borrable</span></td>
+            <td>Resultados de compilación. Se regeneran solos y ya están excluidos del repositorio. Se pueden borrar cuando quieras para liberar espacio.</td>
+          </tr>
+          <tr>
+            <td>8-ball-API-main-github/</td>
+            <td><span class="chip del">Borrable</span></td>
+            <td>La copia que descargaste para comparar. Ya confirmamos que era idéntica al proyecto local. Todavía está en la carpeta.</td>
+          </tr>
+          <tr>
+            <td>KeycloakUrlRewriteHandler.cs</td>
+            <td><span class="chip del">Tu decisión</span></td>
+            <td>Nunca se ejecuta con la configuración actual. Se puede borrar junto con las cinco líneas que lo invocan en <code>Program.cs</code>, o dejarlo documentado como alternativa. Si lo borrás, el proyecto queda más limpio.</td>
+          </tr>
+          <tr>
+            <td>Ruby 8-Ball Pool Manager.pdf</td>
+            <td><span class="chip keep">Se queda</span></td>
+            <td>Es la consigna del challenge. Conviene tenerla al lado del código que la resuelve.</td>
+          </tr>
+          <tr>
+            <td>Properties/launchSettings.json</td>
+            <td><span class="chip keep">Se queda</span></td>
+            <td>Ocupa nada y es lo que hace que ejecutar el proyecto localmente funcione sin configurar nada.</td>
+          </tr>
+          <tr>
+            <td>DEPLOY-AWS.md</td>
+            <td><span class="chip keep">Se queda</span></td>
+            <td>Está solo en tu máquina, fuera del repositorio a propósito porque contiene contraseñas. Es tu manual de reconstrucción si hubiera que rearmar la infraestructura.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Si tocás una cosa, mirá también la otra</h2>
+    <p>Los cuatro pares que más suelen desincronizarse:</p>
+    <ul>
+      <li>Cambiás un campo en <code>Models/</code> → necesitás una migración nueva <em>y</em> agregar el equivalente a <code>migrate.sql</code>.</li>
+      <li>Cambiás un campo en <code>DTO/</code> → se rompe la colección de Postman y cambia la documentación automática.</li>
+      <li>Agregás una regla en <code>Services/</code> → agregá la prueba en <code>PoolManager.Tests/</code>, o el robot no la va a proteger.</li>
+      <li>Agregás una dirección en un controller → sumala a la tabla de endpoints del <code>readme.md</code>.</li>
+    </ul>
+  </section>
+
+</div>

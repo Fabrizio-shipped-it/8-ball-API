@@ -53,7 +53,7 @@ public class MatchService
             return (null, errorHorario, MatchError.Validation);
 
         // Calcular EndTime estimado si no se provee (default: 1 hora)
-        var endTime = dto.EndTime ?? dto.StartTime.AddHours(1);
+        var endTime = dto.EndTime ?? dto.StartTime.AddHours(1);  ///Agregar macro____
 
         // Verificar double-booking de jugadores
         var conflict = await HasConflict(dto.Player1Id, dto.Player2Id, dto.StartTime, endTime);
